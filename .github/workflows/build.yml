@@ -1,0 +1,61 @@
+name: Build & Release
+
+# كل ما ترفع تعديل: يبني USBGuard.exe
+# اذا رقم <Version> بملف src/USBGuard.csproj جديد: ينشر Release جديد = البرنامج يحدث نفسه عند المستخدمين
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore: [ '**.md', 'docs/**', 'script/**' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          [xml]$p = Get-Content src/USBGuard.csproj
+          $v = ($p.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version.Trim()
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $v"
+
+      - name: Build
+        run: dotnet build src/USBGuard.csproj -c Release -o out
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: USBGuard-v${{ steps.ver.outputs.version }}
+          path: out/USBGuard.exe
+
+      - name: Publish release (if new version)
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "v${{ steps.ver.outputs.version }}"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag already exists - skipping"
+            exit 0
+          }
+          $notes = "USB Guard $tag`n`nDeveloper: Muhannad Sat Link - https://github.com/tara44x-code"
+          if (Test-Path CHANGELOG.md) {
+            $section = (Get-Content CHANGELOG.md -Raw) -split '(?m)^## ' | Where-Object { $_ -match "^$([regex]::Escape($tag))\b" } | Select-Object -First 1
+            if ($section) { $notes = ($section -replace "^$([regex]::Escape($tag)).*`n", '').Trim() }
+          }
+          gh release create $tag out/USBGuard.exe --title "USB Guard $tag" --notes "$notes"

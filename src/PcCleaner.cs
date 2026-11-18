@@ -94,7 +94,7 @@ namespace USBGuard
 
                     if (name == "wscript.exe" || name == "cscript.exe" || name == "mshta.exe")
                     {
-                        if (IsSuspiciousCommand(cmd, out var f)) { bad = true; files.AddRange(f); }
+                        if (IsSuspiciousCommand(cmd, out var found)) { bad = true; files.AddRange(found); }
                     }
                     else if (!string.IsNullOrEmpty(exe))
                     {

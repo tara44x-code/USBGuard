@@ -80,7 +80,9 @@ namespace USBGuard
                 var auto = Path.Combine(root, "autorun.inf");
                 if (File.Exists(auto))
                 {
-                    if (Delete(auto)) Hit(r, "autorun.inf");
+                    foreach (var target in AutorunTargets(auto, root))
+                        if (Remove(target, "autorun target")) Hit(r, Path.GetFileName(target));
+                    if (Remove(auto, "autorun.inf")) Hit(r, "autorun.inf");
                 }
 
                 // 2) ملفات تنفيذية مخفية+نظام بجذر الفلاشة (قبل ما نظهر الملفات!)
@@ -91,7 +93,7 @@ namespace USBGuard
                     if (!ExecExt.Contains(ext)) continue;
                     var a = SafeAttr(f);
                     if (a.HasFlag(FileAttributes.Hidden) && a.HasFlag(FileAttributes.System))
-                        if (Delete(f)) Hit(r, Path.GetFileName(f));
+                        if (Remove(f, "hidden executable")) Hit(r, Path.GetFileName(f));
                 }
 
                 // 3) اختصارات فايروس الشورتكت (بالجذر والمستوى الاول)
@@ -100,7 +102,7 @@ namespace USBGuard
                 lnkDirs.AddRange(SafeDirs(root));
                 foreach (var d in lnkDirs)
                     foreach (var f in SafeFiles(d, "*.lnk"))
-                        if (IsMaliciousLnk(f) && Delete(f)) Hit(r, f.Substring(root.Length));
+                        if (IsMaliciousLnk(f) && Remove(f, "shortcut virus")) Hit(r, f.Substring(root.Length));
 
                 // 4) المجلد بلا اسم (الفلاشة تطلع فارغة)
                 P(45, "step_unhide");
@@ -135,14 +137,14 @@ namespace USBGuard
                     var n = Path.GetFileName(e).ToLowerInvariant();
                     if (KnownBad.Contains(n))
                     {
-                        if (Delete(e)) Hit(r, Path.GetFileName(e));
+                        if (Remove(e, "known USB malware")) Hit(r, Path.GetFileName(e));
                         continue;
                     }
                     var ext = Path.GetExtension(n);
                     if ((ext == ".exe" || ext == ".scr" || ext == ".com") && File.Exists(e))
                     {
                         var twin = Path.Combine(root, Path.GetFileNameWithoutExtension(e));
-                        if (Directory.Exists(twin) && Delete(e)) Hit(r, Path.GetFileName(e));
+                        if (Directory.Exists(twin) && Remove(e, "fake folder exe")) Hit(r, Path.GetFileName(e));
                     }
                 }
 
@@ -196,7 +198,7 @@ namespace USBGuard
             return true;
         }
 
-        static bool IsMaliciousLnk(string path)
+        public static bool IsMaliciousLnk(string path)
         {
             try
             {
@@ -268,6 +270,42 @@ namespace USBGuard
                 return p.ExitCode; // 0 = نظيف, 2 = لگى تهديدات
             }
             catch { return -1; }
+        }
+
+        /// <summary>يعزل بالحجر الصحي، واذا ما گدر يحذف</summary>
+        public static bool Remove(string path, string reason, string source = "USB")
+        {
+            if (Quarantine.Add(path, reason, source)) return true;
+            return Delete(path);
+        }
+
+        /// <summary>يقرأ autorun.inf ويرجع الملفات الي يشغلها (open= / shellexecute= / command=)</summary>
+        public static List<string> AutorunTargets(string infPath, string root)
+        {
+            var list = new List<string>();
+            try
+            {
+                var fi = new FileInfo(infPath);
+                if (fi.Length > 64 * 1024) return list;
+                foreach (var raw in File.ReadAllLines(infPath))
+                {
+                    var line = raw.Trim();
+                    int eq = line.IndexOf('=');
+                    if (eq <= 0) continue;
+                    var key = line.Substring(0, eq).Trim().ToLowerInvariant();
+                    if (!(key == "open" || key == "shellexecute" || key.EndsWith("\\command"))) continue;
+                    var val = line.Substring(eq + 1).Trim().Trim('"');
+                    // اول كلمة = اسم الملف
+                    var m = Regex.Match(val, @"^\s*""?([^""]+?\.(exe|com|scr|pif|bat|cmd|vbs|vbe|js|jse|wsf))", RegexOptions.IgnoreCase);
+                    if (!m.Success) continue;
+                    var file = m.Groups[1].Value.Trim();
+                    var full = Path.IsPathRooted(file) ? file : Path.Combine(root, file);
+                    if (full.StartsWith(root, StringComparison.OrdinalIgnoreCase) && File.Exists(full) && !list.Contains(full))
+                        list.Add(full);
+                }
+            }
+            catch { }
+            return list;
         }
 
         // ---------------- filesystem helpers ----------------

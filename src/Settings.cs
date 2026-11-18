@@ -13,6 +13,10 @@ namespace USBGuard
         public static bool AutoScan    { get => GetBool("AutoScan", true);    set => SetBool("AutoScan", value); }
         public static bool DeepScan    { get => GetBool("DeepScan", true);    set => SetBool("DeepScan", value); }
         public static bool AutoUpdate  { get => GetBool("AutoUpdate", true);  set => SetBool("AutoUpdate", value); }
+        public static bool Startup     { get => GetBool("Startup", true);     set => SetBool("Startup", value); }
+        public static bool SelfProtect { get => GetBool("SelfProtect", true); set => SetBool("SelfProtect", value); }
+        public static bool AutoPcClean { get => GetBool("AutoPcClean", true); set => SetBool("AutoPcClean", value); }
+        public static string LastPcScan { get => GetStr("LastPcScan", "");    set => SetStr("LastPcScan", value); }
         public static int  TotalThreats{ get => GetInt("TotalThreats", 0);    set => SetInt("TotalThreats", value); }
         public static int  TotalRestored{get => GetInt("TotalRestored", 0);   set => SetInt("TotalRestored", value); }
         public static string LastScan  { get => GetStr("LastScan", "");       set => SetStr("LastScan", value); }

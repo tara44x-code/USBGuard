@@ -417,3 +417,370 @@ namespace USBGuard
         }
     }
 }
+
+namespace USBGuard
+{
+    using System.Collections.Generic;
+    using System.Linq;
+
+    // =====================================================================
+    //  شريط التبويبات السفلي (مثل تطبيقات الموبايل)
+    // =====================================================================
+    public class TabBar : PaintedControl
+    {
+        public string[] Labels = new string[5];
+        int _selected, _hover = -1;
+        public event Action<int> SelectedChanged;
+        public int Badge; // عدد على تبويب الحجر
+
+        public int Selected
+        {
+            get => _selected;
+            set { if (_selected == value) return; _selected = value; Invalidate(); SelectedChanged?.Invoke(value); }
+        }
+
+        public TabBar() { Cursor = Cursors.Hand; Font = Theme.Font(7.5f); }
+
+        int Count => Labels.Length;
+        int VisualToIndex(int v) => L.Ar ? Count - 1 - v : v;
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            int v = Math.Max(0, Math.Min(Count - 1, e.X * Count / Math.Max(1, Width)));
+            int i = VisualToIndex(v);
+            if (i != _hover) { _hover = i; Invalidate(); }
+            base.OnMouseMove(e);
+        }
+        protected override void OnMouseLeave(EventArgs e) { _hover = -1; base.OnMouseLeave(e); }
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            int v = Math.Max(0, Math.Min(Count - 1, e.X * Count / Math.Max(1, Width)));
+            Selected = VisualToIndex(v);
+            base.OnMouseClick(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics; Theme.HQ(g);
+            using (var b = new SolidBrush(Color.FromArgb(14, 21, 38))) g.FillRectangle(b, ClientRectangle);
+            using (var p = new Pen(Theme.Border)) g.DrawLine(p, 0, 0, Width, 0);
+
+            float w = Width / (float)Count;
+            for (int v = 0; v < Count; v++)
+            {
+                int i = VisualToIndex(v);
+                var cell = new RectangleF(v * w, 0, w, Height);
+                bool sel = i == _selected;
+                var c = sel ? Theme.Accent2 : (i == _hover ? Theme.Text : Theme.Muted);
+
+                if (sel)
+                {
+                    var pill = new RectangleF(cell.X + w / 2 - Theme.S(18), Theme.S(6), Theme.S(36), Theme.S(26));
+                    using var pp = Theme.Round(pill, Theme.S(13));
+                    using var pb = new SolidBrush(Color.FromArgb(40, Theme.Accent));
+                    g.FillPath(pb, pp);
+                }
+                DrawIcon(g, i, new PointF(cell.X + w / 2, Theme.S(19)), Theme.S(8.5f), c);
+                using (var f = Theme.Font(7.5f, sel ? FontStyle.Bold : FontStyle.Regular))
+                    Theme.DrawText(g, Labels[i] ?? "", f, c, new RectangleF(cell.X, Theme.S(34), w, Height - Theme.S(36)), StringAlignment.Center, StringAlignment.Near);
+
+                if (i == 2 && Badge > 0)
+                {
+                    var br = new RectangleF(cell.X + w / 2 + Theme.S(6), Theme.S(4), Theme.S(16), Theme.S(16));
+                    using (var bb = new SolidBrush(Theme.Red)) g.FillEllipse(bb, br);
+                    using var bf = Theme.Font(6.5f, FontStyle.Bold);
+                    using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    g.DrawString(Badge > 99 ? "99" : Badge.ToString(), bf, Brushes.White, br, sf);
+                }
+            }
+        }
+
+        static void DrawIcon(Graphics g, int idx, PointF c, float s, Color color)
+        {
+            using var pen = new Pen(color, Theme.S(1.7f)) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
+            float x = c.X, y = c.Y;
+            switch (idx)
+            {
+                case 0: // درع
+                    g.DrawPolygon(pen, new[] {
+                        new PointF(x, y - s), new PointF(x + s * 0.85f, y - s * 0.6f), new PointF(x + s * 0.8f, y + s * 0.1f),
+                        new PointF(x, y + s), new PointF(x - s * 0.8f, y + s * 0.1f), new PointF(x - s * 0.85f, y - s * 0.6f) });
+                    g.DrawLines(pen, new[] { new PointF(x - s * 0.35f, y), new PointF(x - s * 0.05f, y + s * 0.3f), new PointF(x + s * 0.4f, y - s * 0.3f) });
+                    break;
+                case 1: // شاشة
+                    using (var p = Theme.Round(new RectangleF(x - s, y - s * 0.8f, s * 2, s * 1.35f), s * 0.2f)) g.DrawPath(pen, p);
+                    g.DrawLine(pen, x, y + s * 0.55f, x, y + s * 0.9f);
+                    g.DrawLine(pen, x - s * 0.5f, y + s * 0.95f, x + s * 0.5f, y + s * 0.95f);
+                    break;
+                case 2: // صندوق الحجر
+                    g.DrawRectangle(pen, x - s * 0.85f, y - s * 0.35f, s * 1.7f, s * 1.25f);
+                    g.DrawRectangle(pen, x - s, y - s * 0.85f, s * 2f, s * 0.5f);
+                    g.DrawLine(pen, x - s * 0.3f, y + s * 0.1f, x + s * 0.3f, y + s * 0.1f);
+                    break;
+                case 3: // ساعة
+                    g.DrawEllipse(pen, x - s, y - s, s * 2, s * 2);
+                    g.DrawLine(pen, x, y, x, y - s * 0.55f);
+                    g.DrawLine(pen, x, y, x + s * 0.45f, y + s * 0.25f);
+                    break;
+                case 4: // ترس
+                    g.DrawEllipse(pen, x - s * 0.62f, y - s * 0.62f, s * 1.24f, s * 1.24f);
+                    g.DrawEllipse(pen, x - s * 0.24f, y - s * 0.24f, s * 0.48f, s * 0.48f);
+                    for (int k = 0; k < 8; k++)
+                    {
+                        double a = k * Math.PI / 4;
+                        g.DrawLine(pen, x + (float)Math.Cos(a) * s * 0.72f, y + (float)Math.Sin(a) * s * 0.72f,
+                                        x + (float)Math.Cos(a) * s, y + (float)Math.Sin(a) * s);
+                    }
+                    break;
+            }
+        }
+    }
+
+    // =====================================================================
+    //  قائمة بطاقات قابلة للتمرير (للحجر والسجل ونتائج فحص الحاسبة)
+    // =====================================================================
+    public class CardAction
+    {
+        public string Text;
+        public Color Color = Theme.Accent;
+        public Action Click;
+        internal RectangleF Bounds;
+    }
+
+    public class CardItem
+    {
+        public string Title = "", Subtitle = "", Meta = "";
+        public Color Accent = Theme.Accent;
+        public List<CardAction> Actions = new List<CardAction>();
+    }
+
+    public class CardList : PaintedControl
+    {
+        List<CardItem> _items = new List<CardItem>();
+        int _scroll;
+        CardAction _hoverAction;
+        public string EmptyText = "";
+
+        public CardList()
+        {
+            SetStyle(ControlStyles.Selectable, true);
+            TabStop = true;
+        }
+
+        public void SetItems(IEnumerable<CardItem> items)
+        {
+            _items = items.ToList();
+            _scroll = 0;
+            Invalidate();
+        }
+
+        int CardH => Theme.S(_items.Any(i => i.Actions.Count > 0) ? 82 : 66);
+        int Gap => Theme.S(8);
+        int ContentH => _items.Count * (CardH + Gap);
+        int MaxScroll => Math.Max(0, ContentH - Height);
+
+        protected override void OnMouseEnter(EventArgs e) { Focus(); base.OnMouseEnter(e); }
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            _scroll = Math.Max(0, Math.Min(MaxScroll, _scroll - Math.Sign(e.Delta) * Theme.S(60)));
+            Invalidate();
+            base.OnMouseWheel(e);
+        }
+
+        // سحب بالماوس للتمرير (مثل الموبايل)
+        int _dragY = -1, _dragScroll; bool _dragged;
+        protected override void OnMouseDown(MouseEventArgs e) { _dragY = e.Y; _dragScroll = _scroll; _dragged = false; base.OnMouseDown(e); }
+        protected override void OnMouseUp(MouseEventArgs e) { _dragY = -1; base.OnMouseUp(e); }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            if (_dragY >= 0 && e.Button == MouseButtons.Left)
+            {
+                int d = e.Y - _dragY;
+                if (Math.Abs(d) > Theme.S(4)) _dragged = true;
+                if (_dragged) { _scroll = Math.Max(0, Math.Min(MaxScroll, _dragScroll - d)); Invalidate(); return; }
+            }
+            var a = HitAction(e.Location);
+            if (a != _hoverAction) { _hoverAction = a; Cursor = a != null ? Cursors.Hand : Cursors.Default; Invalidate(); }
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            if (!_dragged) HitAction(e.Location)?.Click?.Invoke();
+            base.OnMouseClick(e);
+        }
+
+        CardAction HitAction(Point p)
+        {
+            foreach (var it in _items)
+                foreach (var a in it.Actions)
+                    if (a.Bounds.Contains(p)) return a;
+            return null;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics; Theme.HQ(g);
+            if (_items.Count == 0)
+            {
+                using var f = Theme.Font(9.5f);
+                var r = new RectangleF(1, 1, Width - 2, Math.Min(Height - 2, Theme.S(90)));
+                using (var p = Theme.Round(r, Theme.S(12)))
+                using (var pen = new Pen(Theme.Border, 1.4f) { DashStyle = DashStyle.Dash }) g.DrawPath(pen, p);
+                Theme.DrawText(g, EmptyText, f, Theme.Muted, r);
+                return;
+            }
+
+            _scroll = Math.Min(_scroll, MaxScroll);
+            int ch = CardH, gap = Gap;
+            float barW = Theme.S(4);
+            using var fTitle = Theme.Font(9.5f, FontStyle.Bold);
+            using var fSub = Theme.Font(8f);
+            using var fMeta = Theme.Font(7.5f);
+            using var fBtn = Theme.Font(8f, FontStyle.Bold);
+
+            for (int i = 0; i < _items.Count; i++)
+            {
+                var it = _items[i];
+                float y = i * (ch + gap) - _scroll;
+                foreach (var a in it.Actions) a.Bounds = RectangleF.Empty;
+                if (y + ch < 0 || y > Height) continue;
+
+                var r = new RectangleF(0.5f, y + 0.5f, Width - Theme.S(8), ch - 1);
+                using (var p = Theme.Round(r, Theme.S(12)))
+                {
+                    using (var b = new SolidBrush(Theme.Card)) g.FillPath(b, p);
+                    using (var pen = new Pen(Theme.Border)) g.DrawPath(pen, p);
+                    var old = g.Clip; g.SetClip(p, CombineMode.Intersect);
+                    using (var ab = new SolidBrush(it.Accent))
+                        g.FillRectangle(ab, L.Ar ? r.Right - barW : r.X, r.Y, barW, r.Height);
+                    g.Clip = old;
+                }
+
+                float pad = Theme.S(14);
+                var inner = new RectangleF(r.X + pad, r.Y + Theme.S(8), r.Width - pad * 2, r.Height - Theme.S(16));
+                Theme.DrawText(g, it.Title, fTitle, Theme.Text, new RectangleF(inner.X, inner.Y, inner.Width, Theme.S(18)), StringAlignment.Near);
+                Theme.DrawText(g, it.Subtitle, fSub, Theme.Muted, new RectangleF(inner.X, inner.Y + Theme.S(19), inner.Width, Theme.S(16)), StringAlignment.Near);
+
+                float rowY = inner.Y + Theme.S(38);
+                // الازرار بنهاية السطر
+                float bx = L.Ar ? inner.X : inner.Right;
+                foreach (var a in it.Actions)
+                {
+                    float bw = TextRenderer.MeasureText(a.Text, fBtn).Width + Theme.S(14);
+                    var br = L.Ar ? new RectangleF(bx, rowY, bw, Theme.S(24)) : new RectangleF(bx - bw, rowY, bw, Theme.S(24));
+                    bx = L.Ar ? bx + bw + Theme.S(6) : bx - bw - Theme.S(6);
+                    a.Bounds = br;
+                    bool hv = a == _hoverAction;
+                    using (var bp = Theme.Round(br, Theme.S(8)))
+                    {
+                        using (var bb = new SolidBrush(Color.FromArgb(hv ? 70 : 35, a.Color))) g.FillPath(bb, bp);
+                        using (var pen = new Pen(Color.FromArgb(hv ? 220 : 120, a.Color))) g.DrawPath(pen, bp);
+                    }
+                    using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    if (L.Ar) sf.FormatFlags |= StringFormatFlags.DirectionRightToLeft;
+                    using var tb = new SolidBrush(hv ? Color.White : a.Color);
+                    g.DrawString(a.Text, fBtn, tb, br, sf);
+                }
+
+                // الوقت/المعلومات بالجهة الثانية
+                if (!string.IsNullOrEmpty(it.Meta))
+                {
+                    float used = it.Actions.Sum(a => a.Bounds.Width + Theme.S(6));
+                    var mr = L.Ar ? new RectangleF(inner.X + used, rowY, inner.Width - used, Theme.S(24))
+                                  : new RectangleF(inner.X, rowY, inner.Width - used, Theme.S(24));
+                    if (it.Actions.Count == 0) mr = new RectangleF(inner.X, inner.Y + Theme.S(34), inner.Width, Theme.S(16));
+                    Theme.DrawText(g, it.Meta, fMeta, Theme.Muted, mr, L.Ar ? StringAlignment.Far : StringAlignment.Near);
+                }
+            }
+
+            // مؤشر التمرير
+            if (MaxScroll > 0)
+            {
+                float trackH = Height - Theme.S(4);
+                float thumbH = Math.Max(Theme.S(30), trackH * Height / (float)ContentH);
+                float thumbY = Theme.S(2) + (trackH - thumbH) * _scroll / MaxScroll;
+                float tx = L.Ar ? 0 : Width - Theme.S(4);
+                using var tp = Theme.Round(new RectangleF(tx, thumbY, Theme.S(3), thumbH), Theme.S(1.5f));
+                using var tb = new SolidBrush(Color.FromArgb(120, Theme.Muted));
+                g.FillPath(tb, tp);
+            }
+        }
+    }
+
+    // =====================================================================
+    //  زر ثانوي (اطار)
+    // =====================================================================
+    public class OutlineButton : PaintedControl
+    {
+        public Color Color = Theme.Accent2;
+        public OutlineButton() { Cursor = Cursors.Hand; Font = Theme.Font(9f, FontStyle.Bold); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics; Theme.HQ(g);
+            var r = new RectangleF(1, 1, Width - 2, Height - 2);
+            using var p = Theme.Round(r, Theme.S(12));
+            using (var b = new SolidBrush(Color.FromArgb(Hover ? 45 : 18, Color))) g.FillPath(b, p);
+            using (var pen = new Pen(Color.FromArgb(Hover ? 230 : 140, Color), 1.3f)) g.DrawPath(pen, p);
+            Theme.DrawText(g, Text, Font, Hover ? Color.White : Color, r);
+        }
+    }
+
+    // =====================================================================
+    //  شريط تحذير (Sality)
+    // =====================================================================
+    public class Banner : PaintedControl
+    {
+        public string Title = "", Message = "";
+        public Color Color = Theme.Amber;
+        public Banner() { Cursor = Cursors.Hand; }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics; Theme.HQ(g);
+            var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+            using var p = Theme.Round(r, Theme.S(12));
+            using (var b = new SolidBrush(Color.FromArgb(Hover ? 50 : 30, Color))) g.FillPath(b, p);
+            using (var pen = new Pen(Color.FromArgb(160, Color))) g.DrawPath(pen, p);
+            using var f1 = Theme.Font(9.5f, FontStyle.Bold);
+            using var f2 = Theme.Font(8f);
+            var pad = Theme.S(12);
+            Theme.DrawText(g, Title, f1, Color, new RectangleF(pad, Theme.S(6), Width - pad * 2, Theme.S(20)), StringAlignment.Near);
+            Theme.DrawText(g, Message, f2, Theme.Text, new RectangleF(pad, Theme.S(26), Width - pad * 2, Height - Theme.S(30)), StringAlignment.Near, StringAlignment.Near);
+        }
+    }
+
+    // =====================================================================
+    //  بطاقة "حول"
+    // =====================================================================
+    public class AboutCard : PaintedControl
+    {
+        public Image Logo;
+        public string Line1 = "", Line2 = "";
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics; Theme.HQ(g);
+            var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+            using (var p = Theme.Round(r, Theme.S(16)))
+            {
+                using (var b = new LinearGradientBrush(r, Color.FromArgb(24, 38, 70), Theme.Card, 90f)) g.FillPath(b, p);
+                using var pen = new Pen(Theme.Border); g.DrawPath(pen, p);
+            }
+            float ls = Theme.S(52);
+            if (Logo != null)
+            {
+                var lr = new RectangleF((Width - ls) / 2, Theme.S(12), ls, ls);
+                using var clip = Theme.Round(lr, Theme.S(12));
+                var old = g.Clip; g.SetClip(clip, CombineMode.Intersect);
+                g.DrawImage(Logo, lr);
+                g.Clip = old;
+            }
+            using (var f = Theme.Font(12f, FontStyle.Bold))
+            using (var b = new SolidBrush(Theme.Text))
+            using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                g.DrawString(Line1, f, b, new RectangleF(0, Theme.S(68), Width, Theme.S(22)), sf);
+            using (var f2 = Theme.Font(8f))
+                Theme.DrawText(g, Line2, f2, Theme.Muted, new RectangleF(Theme.S(10), Theme.S(90), Width - Theme.S(20), Theme.S(18)));
+        }
+    }
+}

@@ -15,7 +15,7 @@
     <DebugType>none</DebugType>
 
     <!-- رقم الاصدار: غيّره هنا وارفع للكيت هوب = يطلع تحديث جديد تلقائياً -->
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
 
     <Product>USB Guard</Product>
     <AssemblyTitle>USB Guard</AssemblyTitle>
@@ -30,6 +30,8 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Management" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
   </ItemGroup>
 
   <ItemGroup>

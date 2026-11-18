@@ -29,6 +29,12 @@ namespace USBGuard
                 else if (a == "--installed") installedNow = true;
                 else if (a == "--uninstall") uninstall = true;
                 else if (a == "--scan" && i + 1 < args.Length) scanTarget = args[++i];
+                else if (a == "--guard" && i + 1 < args.Length)
+                {
+                    // العملية الحارسة: بدون واجهة
+                    if (int.TryParse(args[i + 1], out int pid)) SelfProtect.RunGuard(pid);
+                    return;
+                }
             }
 
             L.Ar = Settings.Arabic;
@@ -53,6 +59,8 @@ namespace USBGuard
             {
                 if (!first)
                 {
+                    // تشغيل من المهمة المجدولة (كل 5 دقايق) والبرنامج اصلاً شغال: نطلع بهدوء
+                    if (tray && scanTarget == null) return;
                     // البرنامج شغال: نرسله طلب الفحص او نفتح نافذته
                     SendToRunning(scanTarget != null ? "SCAN|" + scanTarget : "SHOW");
                     return;

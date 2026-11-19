@@ -135,6 +135,10 @@ namespace USBGuard
             ["long_scan"]       = new[] { "فحص قرص كامل ممكن ياخذ وقت طويل. تگدر توقفه بأي وقت.", "A full disk scan can take a long time. You can stop it anytime." },
             ["pc_step_memory"]  = new[] { "فحص الذاكرة (RAM) والبرامج الشغالة بـ Defender...", "Scanning memory (RAM) and running programs with Defender..." },
             ["totals"]          = new[] { "المجموع: {0} تهديد • {1} مُسترجع",      "Total: {0} threat(s) • {1} restored" },
+            ["step_counting"]   = new[] { "حساب الملفات... {0}",                  "Counting files... {0}" },
+            ["step_def_progress"] = new[] { "{0} / {1} ملف • {2}",                "{0} / {1} files • {2}" },
+            ["time_elapsed"]    = new[] { "الوقت {0}",                            "Elapsed {0}" },
+            ["time_eta"]        = new[] { "الوقت {0} • المتبقي تقريباً {1}",        "Elapsed {0} • about {1} left" },
             ["installed"]       = new[] { "تم تثبيت USB Guard وصار يحمي جهازك ✓", "USB Guard is installed and protecting you ✓" },
         };
 

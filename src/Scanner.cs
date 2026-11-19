@@ -205,7 +205,7 @@ namespace USBGuard
                 if (deep)
                 {
                     P(78, "step_defender");
-                    ApplyDefender(r, RunDefender(root, 3, ct, r.DefenderThreats));
+                    ApplyDefender(r, DefenderChunked(root, ct, progress, 78, 99, r.DefenderThreats));
                 }
 
                 P(100, "step_done");
@@ -285,8 +285,7 @@ namespace USBGuard
 
                 if (deep)
                 {
-                    progress?.Report((-1, L.T("step_defender")));
-                    ApplyDefender(r, RunDefender(path, 3, ct, r.DefenderThreats));
+                    ApplyDefender(r, DefenderChunked(path, ct, progress, 6, 99, r.DefenderThreats));
                 }
                 progress?.Report((100, L.T("step_done")));
                 Settings.Log($"===== انتهى فحص {path}: ملفات={r.FilesChecked} تهديدات={r.Threats} Defender={r.DefenderThreats.Count} =====");
@@ -365,6 +364,126 @@ namespace USBGuard
             r.DefenderFound = r.DefenderThreats.Count > 0;
             foreach (var t in r.DefenderThreats) r.Details.Add("Defender: " + t);
             if (r.DefenderFound) Settings.Log("  Defender لگى: " + string.Join(", ", r.DefenderThreats));
+        }
+
+        // ==================================================================
+        //  Defender مع نسبة تقدّم حقيقية:
+        //  نحسب الملفات، نقسّم المسار لأجزاء، ونفحص جزء جزء حتى نعرف شكد وصلنا
+        // ==================================================================
+        class DirNode
+        {
+            public string Path;
+            public DirNode Parent;
+            public readonly List<DirNode> Children = new List<DirNode>();
+            public readonly List<string> Files = new List<string>(); // نحفظ لحد 60 اسم بس
+            public long DirectFiles;
+            public long Total;
+        }
+
+        const int MaxDirectFilesToSplit = 60;
+
+        static string MpCmdRunPath =>
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Windows Defender\MpCmdRun.exe");
+
+        public static int DefenderChunked(string path, CancellationToken ct, IProgress<(int pct, string msg)> progress,
+                                          int from, int to, List<string> threats)
+        {
+            if (!File.Exists(MpCmdRunPath)) return -1;
+            if (File.Exists(path))
+            {
+                progress?.Report((from, L.F("step_def_progress", "0", "1", Path.GetFileName(path))));
+                return RunDefender(path, 3, ct, threats);
+            }
+
+            // 1) عد الملفات وبناء شجرة المجلدات
+            var nodes = new List<DirNode>();
+            var rootNode = new DirNode { Path = path.Length == 3 ? path : path.TrimEnd('\\') };
+            nodes.Add(rootNode);
+            var stack = new Stack<DirNode>();
+            stack.Push(rootNode);
+            long counted = 0;
+            int lastReport = Environment.TickCount;
+            while (stack.Count > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                var n = stack.Pop();
+                FileSystemInfo[] entries;
+                try { entries = new DirectoryInfo(n.Path).GetFileSystemInfos(); } catch { continue; }
+                foreach (var e in entries)
+                {
+                    if (e is DirectoryInfo d)
+                    {
+                        if ((d.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                        var c = new DirNode { Path = d.FullName, Parent = n };
+                        n.Children.Add(c);
+                        nodes.Add(c);
+                        stack.Push(c);
+                    }
+                    else
+                    {
+                        n.DirectFiles++;
+                        if (n.Files.Count <= MaxDirectFilesToSplit) n.Files.Add(e.FullName);
+                        counted++;
+                    }
+                }
+                if (Environment.TickCount - lastReport > 400)
+                {
+                    lastReport = Environment.TickCount;
+                    progress?.Report((-1, L.F("step_counting", counted.ToString("N0"))));
+                }
+            }
+            // مجموع كل مجلد (الابناء انضافوا بعد الاباء، فنمشي بالعكس)
+            for (int i = nodes.Count - 1; i >= 0; i--)
+            {
+                var n = nodes[i];
+                n.Total += n.DirectFiles;
+                if (n.Parent != null) n.Parent.Total += n.Total;
+            }
+            long total = Math.Max(1, rootNode.Total);
+
+            // 2) تقسيم لأجزاء (كل جزء تقريباً 4% من الملفات)
+            var chunks = new List<(string path, long count)>();
+            long limit = Math.Max(1500, total / 25);
+            Split(rootNode, limit, chunks);
+            if (chunks.Count == 0) chunks.Add((rootNode.Path, total));
+
+            // 3) فحص جزء جزء
+            long done = 0;
+            bool any = false;
+            foreach (var (cp, count) in chunks)
+            {
+                ct.ThrowIfCancellationRequested();
+                int pct = from + (int)((to - from) * done / total);
+                progress?.Report((pct, L.F("step_def_progress", done.ToString("N0"), total.ToString("N0"), ShortName(cp))));
+                var code = RunDefender(cp, 3, ct, threats);
+                if (code < 0 && !any) return -1; // Defender مو شغال
+                any = true;
+                done += count;
+            }
+            progress?.Report((to, L.F("step_def_progress", total.ToString("N0"), total.ToString("N0"), "")));
+            return 0;
+        }
+
+        static void Split(DirNode n, long limit, List<(string, long)> outList)
+        {
+            if (n.Total == 0) return;
+            if (n.Total <= limit || n.Children.Count == 0 || n.DirectFiles > MaxDirectFilesToSplit)
+            {
+                outList.Add((n.Path, n.Total));
+                return;
+            }
+            foreach (var c in n.Children) Split(c, limit, outList);
+            foreach (var f in n.Files) outList.Add((f, 1));
+        }
+
+        static string ShortName(string p)
+        {
+            if (string.IsNullOrEmpty(p)) return "";
+            if (p.Length <= 3) return p;
+            var name = Path.GetFileName(p.TrimEnd('\\'));
+            var parent = Path.GetFileName(Path.GetDirectoryName(p.TrimEnd('\\'))?.TrimEnd('\\') ?? "");
+            var s2 = string.IsNullOrEmpty(parent) ? name : parent + "\\" + name;
+            return s2.Length > 34 ? "..." + s2.Substring(s2.Length - 31) : s2;
         }
 
         /// <summary>

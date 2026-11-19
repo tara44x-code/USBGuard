@@ -47,6 +47,9 @@ namespace USBGuard
         readonly System.Windows.Forms.Timer _elapsedTimer = new System.Windows.Forms.Timer { Interval = 1000 };
         CancellationTokenSource _cts;
         DateTime _scanStart;
+        DateTime? _pctStart;     // اول ما صار عندنا نسبة حقيقية (لحساب الوقت المتبقي)
+        int _pctStartValue, _lastPct = -1;
+        string _scanTargetLabel;
 
         // ---------------- page 1: PC ----------------
         readonly StatusRing _pcRing = new StatusRing();
@@ -208,12 +211,40 @@ namespace USBGuard
             _msg.Font = Theme.Font(8.5f);
             _msg.Color = Theme.Muted;
 
-            _elapsedTimer.Tick += (s, e) =>
-            {
-                if (_ring.Indeterminate) _ring.CenterText = (DateTime.Now - _scanStart).ToString(@"m\:ss");
-            };
+            _elapsedTimer.Tick += (s, e) => UpdateScanClock();
 
             p.Controls.AddRange(new Control[] { _ring, _title, _sub, _driveList, _scanBtn, _pathBtn, _msg });
+        }
+
+        static string FormatSpan(TimeSpan t) =>
+            t.TotalHours >= 1 ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}" : $"{t.Minutes}:{t.Seconds:00}";
+
+        static string FormatRemaining(TimeSpan t)
+        {
+            if (t.TotalMinutes < 1) return L.Ar ? "أقل من دقيقة" : "< 1 min";
+            if (t.TotalHours < 1) return L.Ar ? $"{(int)Math.Ceiling(t.TotalMinutes)} دقيقة" : $"{(int)Math.Ceiling(t.TotalMinutes)} min";
+            return L.Ar ? $"{(int)t.TotalHours} ساعة و {t.Minutes} دقيقة" : $"{(int)t.TotalHours} h {t.Minutes} min";
+        }
+
+        /// <summary>العداد تحت الدائرة: الوقت + المتبقي تقريباً</summary>
+        void UpdateScanClock()
+        {
+            if (!_scanning) return;
+            var elapsed = DateTime.Now - _scanStart;
+            if (_ring.Indeterminate) _ring.CenterText = FormatSpan(elapsed);
+
+            string line = L.F("time_elapsed", FormatSpan(elapsed));
+            if (_pctStart.HasValue && _lastPct > _pctStartValue && _lastPct < 100)
+            {
+                var since = (DateTime.Now - _pctStart.Value).TotalSeconds;
+                if (since > 15)
+                {
+                    double rate = (_lastPct - _pctStartValue) / since; // % بالثانية
+                    if (rate > 0) line = L.F("time_eta", FormatSpan(elapsed), FormatRemaining(TimeSpan.FromSeconds((100 - _lastPct) / rate)));
+                }
+            }
+            _sub.Text = (_scanTargetLabel ?? "") + "  •  " + line;
+            _sub.Invalidate();
         }
 
         void RebuildPathMenu()
@@ -644,14 +675,26 @@ namespace USBGuard
             _ring.Indeterminate = !usbMode;
             _ring.CenterText = null;
             _scanStart = DateTime.Now;
+            _pctStart = null; _lastPct = -1;
+            _scanTargetLabel = target.Length > 30 ? "..." + target.Substring(target.Length - 27) : target;
             _elapsedTimer.Start();
             SetState(GuardState.Scanning, target);
+            UpdateScanClock();
             if (!usbMode && Scanner.IsDriveRoot(target)) { _msg.Text = L.T("long_scan"); _msg.Invalidate(); }
 
             var progress = new Progress<(int pct, string msg)>(p =>
             {
+                if (!_scanning) return;
                 if (p.pct < 0) _ring.Indeterminate = true;
-                else if (usbMode) { _ring.Indeterminate = false; _ring.Progress = p.pct; }
+                else
+                {
+                    _ring.Indeterminate = false;
+                    _ring.CenterText = null;
+                    _ring.Progress = p.pct;
+                    if (!_pctStart.HasValue && !usbMode) { _pctStart = DateTime.Now; _pctStartValue = p.pct; }
+                    if (!_pctStart.HasValue && usbMode) { _pctStart = _scanStart; _pctStartValue = 0; }
+                    _lastPct = p.pct;
+                }
                 _msg.Text = p.msg; _msg.Invalidate();
             });
 

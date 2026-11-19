@@ -15,8 +15,9 @@ using Microsoft.Win32;
 
 namespace USBGuard
 {
-    public class MainForm : Form
+    public class MainForm : Form, IMessageFilter
     {
+        [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point p);
         // ---------------- Win32 ----------------
         const int WM_DEVICECHANGE = 0x0219, DBT_DEVICEARRIVAL = 0x8000, DBT_DEVICEREMOVECOMPLETE = 0x8004, DBT_DEVTYP_VOLUME = 2;
         const int WM_NCLBUTTONDOWN = 0xA1, HTCAPTION = 0x2;
@@ -70,8 +71,18 @@ namespace USBGuard
 
         // ---------------- page 4: settings ----------------
         readonly TextBlock _sTitle = new TextBlock();
+        readonly ScrollPanel _sScroll = new ScrollPanel();
+        readonly TextBlock _hdrProtect = new TextBlock(), _hdrScan = new TextBlock(), _hdrGeneral = new TextBlock(), _hdrAbout = new TextBlock();
         readonly ToggleRow _tStartup = new ToggleRow(), _tAuto = new ToggleRow(), _tDeep = new ToggleRow(),
-                           _tPc = new ToggleRow(), _tSelf = new ToggleRow(), _tUpdate = new ToggleRow();
+                           _tPc = new ToggleRow(), _tSelf = new ToggleRow(), _tUpdate = new ToggleRow(),
+                           _tRealtime = new ToggleRow(), _tGame = new ToggleRow(), _tUsbRo = new ToggleRow(), _tPassword = new ToggleRow();
+        readonly ChoiceRow _cSchedule = new ChoiceRow(), _cHour = new ChoiceRow();
+
+        // ---------------- v1.3 ----------------
+        readonly RealtimeGuard _rt = new RealtimeGuard();
+        readonly System.Windows.Forms.Timer _scheduleTimer = new System.Windows.Forms.Timer { Interval = 30000 };
+        readonly List<(string text, ToolTipIcon icon)> _heldNotices = new List<(string, ToolTipIcon)>();
+        int _lastPage;
         readonly AboutCard _about = new AboutCard();
         readonly LinkText _dev = new LinkText(), _lnkUninstall = new LinkText();
         readonly OutlineButton _btnUpdate = new OutlineButton(), _btnRepo = new OutlineButton();
@@ -130,6 +141,15 @@ namespace USBGuard
                 if (Settings.SelfProtect) SelfProtect.StartGuard();
             });
 
+            // الحماية اللحظية
+            _rt.Detected += (path, what) => UI(() => OnRealtimeDetected(path, what));
+            // الفحص المجدول + تنبيهات وضع اللعب
+            _scheduleTimer.Tick += (s, e) => OnScheduleTick();
+            // عجلة الماوس تمرر القوائم بدون ما تحتاج تضغط عليها
+            Application.AddMessageFilter(this);
+            // سحب وافلات ملفات على النافذة
+            EnableDrop(this);
+
             var _ = Handle; // انشاء النافذة حتى تستلم رسائل توصيل الفلاشة حتى لو مخفية
             StartPipeServer();
         }
@@ -167,6 +187,12 @@ namespace USBGuard
 
         void ShowPage(int i)
         {
+            if (i == 4 && _lastPage != 4 && !Security.Require(this))
+            {
+                _tabs.Selected = _lastPage;
+                return;
+            }
+            _lastPage = i;
             for (int k = 0; k < _pages.Length; k++) _pages[k].Visible = k == i;
             if (_tabs.Selected != i) _tabs.Selected = i;
             _ring.Animate = Visible && i == 0;
@@ -357,6 +383,7 @@ namespace USBGuard
 
         void RestoreItem(QuarantineItem q)
         {
+            if (!Security.Require(this)) return;
             if (Msg(L.F("q_restore_ask", q.OriginalPath), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             if (Quarantine.Restore(q.Id, out var to)) Msg(L.F("q_restored", to), MessageBoxButtons.OK, MessageBoxIcon.Information);
             else Msg(L.T("q_restore_fail"), MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -394,11 +421,15 @@ namespace USBGuard
             _hList.EmptyText = L.T("h_empty");
             _hList.SetItems(items.Select(h => new CardItem
             {
-                Title = h.Target == "PC" ? L.T("h_pc") : L.F("h_usb", h.Target),
+                Title = h.Target == "PC" ? L.T("h_pc") : h.Target == "RT" ? L.T("h_rt")
+                      : Scanner.IsRemovableRoot(h.Target) ? L.F("h_usb", h.Target) : h.Target,
                 Subtitle = (h.Threats == 0 && h.Restored == 0) ? L.T("h_clean")
                            : L.F("h_summary", h.Threats, h.Restored) + (h.Items != null && h.Items.Count > 0 ? "  —  " + string.Join("، ", h.Items.Take(4)) : ""),
-                Meta = h.Date,
+                Meta = h.Date + (string.IsNullOrEmpty(h.Duration) ? "" : " • " + h.Duration),
                 Accent = h.Threats > 0 ? Theme.Amber : Theme.Green,
+                Actions = !string.IsNullOrEmpty(h.Report) && File.Exists(h.Report)
+                    ? new List<CardAction> { new CardAction { Text = L.T("h_report"), Color = Theme.Accent2, Click = () => SystemTools.OpenUrl(h.Report) } }
+                    : new List<CardAction>(),
             }));
         }
 
@@ -412,53 +443,213 @@ namespace USBGuard
             _sTitle.Font = Theme.Font(14f, FontStyle.Bold);
             _sTitle.Align = StringAlignment.Near;
 
-            int ty = 44;
-            foreach (var t in new[] { _tStartup, _tAuto, _tDeep, _tPc, _tSelf, _tUpdate })
+            _sScroll.Bounds = R(0, 42, W, PageH - 42);
+            _sScroll.SetContentHeight(Theme.S(940));
+            var c = _sScroll.Content;
+
+            int y = 4;
+            void Header(TextBlock h)
             {
-                t.Bounds = R(24, ty, W - 48, 32);
-                ty += 33;
+                h.Bounds = R(24, y, W - 48, 22); h.Font = Theme.Font(8.5f, FontStyle.Bold);
+                h.Color = Theme.Accent2; h.Align = StringAlignment.Near;
+                c.Controls.Add(h); y += 24;
             }
+            void Row(Control t) { t.Bounds = R(24, y, W - 48, 32); c.Controls.Add(t); y += 33; }
+
+            Header(_hdrProtect);
+            Row(_tRealtime); Row(_tSelf); Row(_tGame); Row(_tUsbRo);
+            y += 8; Header(_hdrScan);
+            Row(_tAuto); Row(_tDeep); Row(_tPc); Row(_cSchedule); Row(_cHour);
+            y += 8; Header(_hdrGeneral);
+            Row(_tStartup); Row(_tUpdate); Row(_tPassword);
+            y += 8; Header(_hdrAbout);
+
             _tStartup.SetSilently(Settings.Startup);
             _tAuto.SetSilently(Settings.AutoScan);
             _tDeep.SetSilently(Settings.DeepScan);
             _tPc.SetSilently(Settings.AutoPcClean);
             _tSelf.SetSilently(Settings.SelfProtect);
             _tUpdate.SetSilently(Settings.AutoUpdate);
+            _tRealtime.SetSilently(Settings.Realtime);
+            _tGame.SetSilently(Settings.GameMode);
+            _tUsbRo.SetSilently(Settings.UsbReadOnly);
+            _tPassword.SetSilently(Security.IsSet);
 
             _tStartup.CheckedChanged += (s, e) => { var v = _tStartup.Checked; Settings.Startup = v; Task.Run(() => SystemTools.SetStartup(v)); };
             _tAuto.CheckedChanged += (s, e) => Settings.AutoScan = _tAuto.Checked;
             _tDeep.CheckedChanged += (s, e) => Settings.DeepScan = _tDeep.Checked;
             _tPc.CheckedChanged += (s, e) => Settings.AutoPcClean = _tPc.Checked;
             _tUpdate.CheckedChanged += (s, e) => Settings.AutoUpdate = _tUpdate.Checked;
+            _tGame.CheckedChanged += (s, e) => Settings.GameMode = _tGame.Checked;
             _tSelf.CheckedChanged += (s, e) =>
             {
                 Settings.SelfProtect = _tSelf.Checked;
                 if (_tSelf.Checked) { SelfProtect.BeginSession(); SelfProtect.ProtectCurrentProcess(); SelfProtect.StartGuard(); }
                 else { SelfProtect.SignalQuit(); SelfProtect.UnprotectCurrentProcess(); }
             };
+            _tRealtime.CheckedChanged += (s, e) =>
+            {
+                Settings.Realtime = _tRealtime.Checked;
+                if (_tRealtime.Checked) _rt.Start(); else _rt.Stop();
+            };
+            _tUsbRo.CheckedChanged += (s, e) =>
+            {
+                Settings.UsbReadOnly = _tUsbRo.Checked;
+                var v = _tUsbRo.Checked;
+                Task.Run(() => SystemTools.SetUsbReadOnly(v));
+                if (v) Msg(L.T("usbro_note"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            };
+            _tPassword.CheckedChanged += (s, e) => TogglePassword();
+
+            _cSchedule.Next += (s, e) =>
+            {
+                Settings.ScheduleMode = (Settings.ScheduleMode + 1) % 9;
+                Schedule.MarkRun(); // نبدأ العد من الآن
+                UpdateScheduleRows();
+            };
+            _cHour.Next += (s, e) =>
+            {
+                Settings.ScheduleHour = (Settings.ScheduleHour + 1) % 24;
+                Schedule.MarkRun();
+                UpdateScheduleRows();
+            };
 
             _about.Logo = _logo;
-            _about.Bounds = R(20, 252, W - 40, 168);
+            _about.Bounds = R(20, y, W - 40, 168);
             _dev.Bounds = R(10, 114, W - 60, 24); // داخل بطاقة "حول"
             _dev.Font = Theme.Font(9.5f, FontStyle.Bold);
             _dev.Normal = Theme.Accent2;
             _dev.HoverColor = Color.White;
             _dev.Click += (s, e) => SystemTools.OpenUrl(SystemTools.DeveloperUrl);
             _dev.BackColor = Color.Transparent;
+            _about.Controls.Add(_dev);
+            y += 180;
 
             int bw = (W - 40 - 10) / 2;
-            _btnUpdate.Bounds = R(20, 432, bw, 42);
-            _btnRepo.Bounds = R(20 + bw + 10, 432, bw, 42);
+            _btnUpdate.Bounds = R(20, y, bw, 42);
+            _btnRepo.Bounds = R(20 + bw + 10, y, bw, 42);
             _btnRepo.Color = Theme.Accent;
             _btnUpdate.Click += async (s, e) => await CheckUpdates(manual: true);
             _btnRepo.Click += (s, e) => SystemTools.OpenUrl(SystemTools.RepoUrl);
+            y += 56;
 
-            _lnkUninstall.Bounds = R(20, 492, W - 40, 22);
+            _lnkUninstall.Bounds = R(20, y, W - 40, 22);
             _lnkUninstall.HoverColor = Theme.Red;
             _lnkUninstall.Click += (s, e) => DoUninstall();
+            y += 40;
 
-            _about.Controls.Add(_dev);
-            p.Controls.AddRange(new Control[] { _sTitle, _tStartup, _tAuto, _tDeep, _tPc, _tSelf, _tUpdate, _about, _btnUpdate, _btnRepo, _lnkUninstall });
+            c.Controls.AddRange(new Control[] { _about, _btnUpdate, _btnRepo, _lnkUninstall });
+            _sScroll.SetContentHeight(Theme.S(y));
+            p.Controls.AddRange(new Control[] { _sTitle, _sScroll });
+        }
+
+        void UpdateScheduleRows()
+        {
+            _cSchedule.Value = Schedule.ModeText(Settings.ScheduleMode);
+            _cHour.Value = Schedule.HourText(Settings.ScheduleHour);
+            _cHour.Visible = Settings.ScheduleMode > 0;
+            _cSchedule.Invalidate(); _cHour.Invalidate();
+        }
+
+        void TogglePassword()
+        {
+            if (_tPassword.Checked)
+            {
+                if (Msg(L.T("pw_warn"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) { _tPassword.SetSilently(false); return; }
+                var a = PasswordDialog.Ask(this, L.T("pw_new"));
+                while (a != null && a.Length < 4) a = PasswordDialog.Ask(this, L.T("pw_new"), L.T("pw_short"));
+                if (a == null) { _tPassword.SetSilently(false); return; }
+                var b = PasswordDialog.Ask(this, L.T("pw_confirm"));
+                if (b == null || a != b)
+                {
+                    if (b != null) Msg(L.T("pw_mismatch"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    _tPassword.SetSilently(false);
+                    return;
+                }
+                Security.SetPassword(a);
+                Msg(L.T("pw_set_ok"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                if (!Security.Require(this)) { _tPassword.SetSilently(true); return; }
+                Security.Clear();
+            }
+        }
+
+        // ==================================================================
+        //  v1.3: الحماية اللحظية / الجدولة / وضع اللعب / السحب والافلات
+        // ==================================================================
+        void OnRealtimeDetected(string path, string what)
+        {
+            Settings.TotalThreats++;
+            var name = Path.GetFileName(path);
+            History.Add(new ScanRecord
+            {
+                Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
+                Target = "RT",
+                Threats = 1,
+                Items = new List<string> { path + "  —  " + what },
+            });
+            Notify(L.F("rt_detected", name + " (" + what + ")"), ToolTipIcon.Warning);
+        }
+
+        void OnScheduleTick()
+        {
+            // تنبيهات انحجزت وقت اللعب
+            if (!GameMode.IsBusy())
+            {
+                List<(string text, ToolTipIcon icon)> held;
+                lock (_heldNotices) { held = _heldNotices.ToList(); _heldNotices.Clear(); }
+                if (held.Count == 1) Notify(held[0].text, held[0].icon);
+                else if (held.Count > 1) Notify(L.F("game_missed", held.Count), held.Any(h => h.icon == ToolTipIcon.Warning) ? ToolTipIcon.Warning : ToolTipIcon.Info);
+            }
+
+            // الفحص المجدول (ما يبدي وقت اللعب او اذا اكو فحص شغال)
+            if (Schedule.IsDue(DateTime.Now) && !GameMode.IsBusy() && !_pcScanning && !_scanning)
+            {
+                Schedule.MarkRun();
+                Settings.Log("بدأ الفحص المجدول");
+                Notify(L.T("sch_running"), ToolTipIcon.Info);
+                StartPcScan(silent: true);
+                foreach (var r in _driveList.Items.Where(x => x.Kind == 0).Select(x => x.Root).ToList()) StartScan(r);
+            }
+        }
+
+        void EnableDrop(Control c)
+        {
+            c.AllowDrop = true;
+            c.DragEnter += (s, e) => { if (e.Data.GetDataPresent(DataFormats.FileDrop)) e.Effect = DragDropEffects.Copy; };
+            c.DragDrop += (s, e) =>
+            {
+                if (!(e.Data.GetData(DataFormats.FileDrop) is string[] paths) || paths.Length == 0) return;
+                ShowPage(0);
+                _msg.Text = L.F("drop_scan", paths.Length == 1 ? paths[0] : paths.Length.ToString()); _msg.Invalidate();
+                foreach (var p in paths) StartScan(p);
+            };
+            foreach (Control ch in c.Controls) EnableDrop(ch);
+            c.ControlAdded += (s, e) => EnableDrop(e.Control);
+        }
+
+        public bool PreFilterMessage(ref Message m)
+        {
+            const int WM_MOUSEWHEEL = 0x020A;
+            if (m.Msg != WM_MOUSEWHEEL || !Visible) return false;
+            try
+            {
+                var target = Control.FromChildHandle(WindowFromPoint(Cursor.Position));
+                if (target == null || target.FindForm() != this) return false;
+                for (var c = target; c != null; c = c.Parent)
+                {
+                    if (c is IWheelScrollable ws && c.Visible)
+                    {
+                        int delta = (short)((m.WParam.ToInt64() >> 16) & 0xFFFF);
+                        ws.WheelScroll(delta);
+                        return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
         }
 
         // ==================================================================
@@ -488,7 +679,7 @@ namespace USBGuard
             _trayMenu.Items.Add(L.T("pc_btn"), null, (s, e) => { ShowMain(); ShowPage(1); StartPcScan(false); });
             _trayMenu.Items.Add(L.T("check_update"), null, async (s, e) => await CheckUpdates(manual: true));
             _trayMenu.Items.Add(new ToolStripSeparator());
-            _trayMenu.Items.Add(L.T("tray_exit"), null, (s, e) => ExitApp());
+            _trayMenu.Items.Add(L.T("tray_exit"), null, (s, e) => { if (Security.Require(Visible ? this : null)) ExitApp(); });
             foreach (ToolStripItem i in _trayMenu.Items) i.ForeColor = Theme.Text;
         }
 
@@ -532,6 +723,17 @@ namespace USBGuard
             _sTitle.Text = L.T("s_title");
             LayoutHeaderLinks();
 
+            _hdrProtect.Text = L.T("sec_protect");
+            _hdrScan.Text = L.T("sec_scan");
+            _hdrGeneral.Text = L.T("sec_general");
+            _hdrAbout.Text = L.T("sec_about");
+            _tRealtime.Text = L.T("opt_realtime");
+            _tGame.Text = L.T("opt_gamemode");
+            _tUsbRo.Text = L.T("opt_usbro");
+            _tPassword.Text = L.T("opt_password");
+            _cSchedule.Text = L.T("opt_schedule");
+            _cHour.Text = L.T("opt_schedule_time");
+            UpdateScheduleRows();
             _tStartup.Text = L.T("opt_startup");
             _tAuto.Text = L.T("opt_autoscan");
             _tDeep.Text = L.T("opt_deep");
@@ -727,6 +929,10 @@ namespace USBGuard
             Settings.TotalThreats += result.Threats + result.DefenderThreats.Count;
             Settings.TotalRestored += result.Restored;
             Settings.LastScan = DateTime.Now.ToString("HH:mm");
+            var took = DateTime.Now - _scanStart;
+            var report = Report.Create(target, target, _scanStart, took, result.FilesChecked,
+                result.Threats + result.DefenderThreats.Count, result.Restored, result.Details,
+                deep && !result.DefenderRan ? new[] { L.T("def_unavailable") } : null);
             History.Add(new ScanRecord
             {
                 Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
@@ -734,6 +940,9 @@ namespace USBGuard
                 Threats = result.Threats + result.DefenderThreats.Count,
                 Restored = result.Restored,
                 Items = result.Details.Take(20).ToList(),
+                Report = report,
+                Duration = FormatSpan(took),
+                Files = result.FilesChecked,
             });
 
             string summary;
@@ -780,12 +989,15 @@ namespace USBGuard
             });
 
             var deepPc = Settings.DeepScan;
+            var pcStart = DateTime.Now;
             var r = await Task.Run(() => PcCleaner.Scan(deepPc, progress));
 
             _pcScanning = false;
             Settings.LastPcScan = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
             Settings.TotalThreats += r.Threats;
             _lastPcDetails = r.Details.ToList();
+            var pcTook = DateTime.Now - pcStart;
+            var pcReport = Report.Create(L.T("pc_title"), Environment.MachineName, pcStart, pcTook, 0, r.Threats, 0, r.Details, r.Warnings);
             History.Add(new ScanRecord
             {
                 Date = Settings.LastPcScan,
@@ -793,6 +1005,8 @@ namespace USBGuard
                 Threats = r.Threats,
                 Restored = 0,
                 Items = r.Details.Take(20).ToList(),
+                Report = pcReport,
+                Duration = FormatSpan(pcTook),
             });
 
             _pcBtn.Enabled = true;
@@ -845,7 +1059,7 @@ namespace USBGuard
                         var letters = new List<string>();
                         for (int i = 0; i < 26; i++) if ((mask & (1 << i)) != 0) letters.Add((char)('A' + i) + @":\");
                         if (ev == DBT_DEVICEARRIVAL) OnDrivesArrived(letters);
-                        else RefreshDrives();
+                        else { foreach (var l in letters) _rt.RemoveRoot(l); RefreshDrives(); }
                     }
                 }
             }
@@ -866,6 +1080,7 @@ namespace USBGuard
                     await Task.Delay(500);
                 }
                 Settings.Log($"تم توصيل فلاشة: {root}");
+                if (Settings.Realtime) _rt.AddRoot(root);
                 if (Settings.AutoScan)
                 {
                     if (!Visible) Notify(L.F("new_drive", root), ToolTipIcon.Info);
@@ -1008,6 +1223,8 @@ namespace USBGuard
                 SelfProtect.StartGuard();
             }
             _repairTimer.Start();
+            _scheduleTimer.Start();
+            if (Settings.Realtime) _rt.Start();
 
             await Task.Run(() => { SystemTools.DisableAutorun(); SystemTools.RepairSystem(); SelfProtect.SelfRepair(); });
 
@@ -1050,6 +1267,8 @@ namespace USBGuard
         void HideToTray()
         {
             Hide();
+            Security.Lock();
+            if (_tabs.Selected == 4) ShowPage(0);
             if (!_trayHintShown)
             {
                 _trayHintShown = true;
@@ -1077,6 +1296,8 @@ namespace USBGuard
         void ExitApp()
         {
             SelfProtect.SignalQuit();
+            try { _rt.Dispose(); } catch { }
+            Application.RemoveMessageFilter(this);
             _exiting = true;
             _repairTimer.Stop();
             _tray.Visible = false;
@@ -1122,6 +1343,11 @@ namespace USBGuard
         // ==================================================================
         void Notify(string text, ToolTipIcon icon, bool forceDialog = false)
         {
+            if (!forceDialog && GameMode.IsBusy())
+            {
+                lock (_heldNotices) _heldNotices.Add((text, icon));
+                return;
+            }
             if (forceDialog) { Msg(text, MessageBoxButtons.OK, icon == ToolTipIcon.Warning ? MessageBoxIcon.Warning : MessageBoxIcon.Information); return; }
             try { _tray.ShowBalloonTip(5000, "USB Guard", text, icon); } catch { }
         }
@@ -1134,7 +1360,7 @@ namespace USBGuard
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { try { _tray.Dispose(); } catch { } _logo?.Dispose(); _repairTimer.Dispose(); }
+            if (disposing) { try { _tray.Dispose(); } catch { } _logo?.Dispose(); _repairTimer.Dispose(); _scheduleTimer.Dispose(); _elapsedTimer.Dispose(); }
             base.Dispose(disposing);
         }
     }

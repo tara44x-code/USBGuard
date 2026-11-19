@@ -42,8 +42,12 @@ namespace USBGuard
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            using (var g0 = Graphics.FromHwnd(IntPtr.Zero))
+                Theme.Scale = Math.Max(1f, g0.DpiX / 96f);
+
             if (uninstall)
             {
+                if (!Security.Require(null)) return;
                 var opt = L.Ar ? MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign : 0;
                 if (MessageBox.Show(L.T("uninstall_ask"), "USB Guard", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
                         MessageBoxDefaultButton.Button2, opt) == DialogResult.Yes)
@@ -87,9 +91,6 @@ namespace USBGuard
                         SystemTools.UpdateUninstallVersion();
                     }
                 }
-
-                using (var g = Graphics.FromHwnd(IntPtr.Zero))
-                    Theme.Scale = Math.Max(1f, g.DpiX / 96f);
 
                 Application.Run(new MainForm(tray, scanTarget, updated, installedNow));
             }

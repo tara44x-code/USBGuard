@@ -63,8 +63,9 @@ namespace USBGuard
         {
             int fixes = 0;
 
-            // منع الكتابة على الفلاشة
-            fixes += SetIfDifferent(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Control\StorageDevicePolicies", "WriteProtect", 0, onlyIfExists: true);
+            // منع الكتابة على الفلاشة: نرجعه طبيعي الا اذا المستخدم نفسه مفعّل "قفل الفلاشات"
+            if (Settings.UsbReadOnly) SetUsbReadOnly(true);
+            else fixes += SetIfDifferent(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Control\StorageDevicePolicies", "WriteProtect", 0, onlyIfExists: true);
 
             // قفل الكتابة على الاقراص القابلة للازالة / CD
             try
@@ -93,6 +94,18 @@ namespace USBGuard
 
             if (fixes > 0) Settings.Log($"تصليح النظام: {fixes} اعداد مخرّب رجع طبيعي");
             return fixes;
+        }
+
+        /// <summary>قفل كل الفلاشات (قراءة فقط) — يتطبق بعد اعادة توصيل الفلاشة</summary>
+        public static void SetUsbReadOnly(bool on)
+        {
+            try
+            {
+                using var k = Registry.LocalMachine.CreateSubKey(@"SYSTEM\CurrentControlSet\Control\StorageDevicePolicies");
+                k.SetValue("WriteProtect", on ? 1 : 0, RegistryValueKind.DWord);
+                Settings.Log(on ? "قفل الفلاشات: قراءة فقط" : "فتح قفل الفلاشات");
+            }
+            catch { }
         }
 
         static int SetIfDifferent(RegistryKey hive, string path, string name, int value, bool onlyIfExists = false)
@@ -155,6 +168,7 @@ namespace USBGuard
         public static void Uninstall()
         {
             Settings.Startup = false;
+            if (Settings.UsbReadOnly) SetUsbReadOnly(false); // ما نخلي الفلاشات مقفولة بعد الحذف
             SelfProtect.SignalQuit();
             SetStartup(false);
             foreach (var (key, _) in MenuKeys) { try { Registry.ClassesRoot.DeleteSubKeyTree(key, false); } catch { } }

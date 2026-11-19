@@ -320,9 +320,9 @@ namespace USBGuard
             catch { }
         }
 
-        static bool IsHiddenSys(FileAttributes a) => (a & FileAttributes.Hidden) != 0 && (a & FileAttributes.System) != 0;
+        public static bool IsHiddenSys(FileAttributes a) => (a & FileAttributes.Hidden) != 0 && (a & FileAttributes.System) != 0;
 
-        static bool IsShortcutVirusLnk(string path)
+        public static bool IsShortcutVirusLnk(string path)
         {
             try
             {

@@ -565,8 +565,13 @@ namespace USBGuard
         public List<CardAction> Actions = new List<CardAction>();
     }
 
-    public class CardList : PaintedControl
+    public class CardList : PaintedControl, IWheelScrollable
     {
+        public void WheelScroll(int delta)
+        {
+            _scroll = Math.Max(0, Math.Min(MaxScroll, _scroll - Math.Sign(delta) * Theme.S(60)));
+            Invalidate();
+        }
         List<CardItem> _items = new List<CardItem>();
         int _scroll;
         CardAction _hoverAction;
@@ -811,8 +816,13 @@ namespace USBGuard
     }
 
     /// <summary>قائمة الاقراص (فلاشات + هاردات) قابلة للتمرير والاختيار</summary>
-    public class DriveList : PaintedControl
+    public class DriveList : PaintedControl, IWheelScrollable
     {
+        public void WheelScroll(int delta)
+        {
+            _scroll = Math.Max(0, Math.Min(MaxScroll, _scroll - Math.Sign(delta) * Theme.S(54)));
+            Invalidate();
+        }
         List<DriveItem> _items = new List<DriveItem>();
         int _scroll, _hover = -1;
         public string SelectedRoot;
@@ -937,6 +947,135 @@ namespace USBGuard
                 using var tb = new SolidBrush(Color.FromArgb(120, Theme.Muted));
                 g.FillPath(tb, tp);
             }
+        }
+    }
+}
+
+
+namespace USBGuard
+{
+    /// <summary>كنترول يتمرر بعجلة الماوس حتى بدون ما يكون عليه التركيز</summary>
+    public interface IWheelScrollable { void WheelScroll(int delta); }
+
+    // =====================================================================
+    //  لوحة قابلة للتمرير (لصفحة الاعدادات)
+    // =====================================================================
+    public class ScrollPanel : DoubleBufferedPanel, IWheelScrollable
+    {
+        public readonly Panel Content = new DoubleBufferedPanel { BackColor = Color.Transparent, Location = Point.Empty };
+        int _dragY = -1, _dragTop;
+
+        public ScrollPanel()
+        {
+            BackColor = Color.Transparent;
+            Controls.Add(Content);
+        }
+
+        public void SetContentHeight(int h)
+        {
+            Content.Size = new Size(Width, Math.Max(h, Height));
+            Content.Top = 0;
+        }
+
+        public void WheelScroll(int delta)
+        {
+            int min = Math.Min(0, Height - Content.Height);
+            int top = Content.Top + Math.Sign(delta) * Theme.S(60);
+            Content.Top = Math.Max(min, Math.Min(0, top));
+            Invalidate(true);
+        }
+    }
+
+    // =====================================================================
+    //  سطر اختيار (يتبدل بالضغط) — للفحص المجدول
+    // =====================================================================
+    public class ChoiceRow : PaintedControl
+    {
+        public string Value = "";
+        public event EventHandler Next;
+        public ChoiceRow() { Cursor = Cursors.Hand; Font = Theme.Font(9.5f); }
+
+        protected override void OnClick(EventArgs e) { Next?.Invoke(this, EventArgs.Empty); base.OnClick(e); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics; Theme.HQ(g);
+            using var fb = Theme.Font(8.5f, FontStyle.Bold);
+            float pw = TextRenderer.MeasureText(Value ?? "", fb).Width + Theme.S(26);
+            float ph = Theme.S(24);
+            var pr = L.Ar ? new RectangleF(2, (Height - ph) / 2f, pw, ph) : new RectangleF(Width - pw - 2, (Height - ph) / 2f, pw, ph);
+            using (var p = Theme.Round(pr, ph / 2f))
+            {
+                using (var b = new SolidBrush(Color.FromArgb(Hover ? 70 : 40, Theme.Accent))) g.FillPath(b, p);
+                using var pen = new Pen(Color.FromArgb(150, Theme.Accent)); g.DrawPath(pen, p);
+            }
+            Theme.DrawText(g, (Value ?? "") + "  ▾", fb, Theme.Accent2, pr);
+            var tr = L.Ar ? new RectangleF(pw + Theme.S(10), 0, Width - pw - Theme.S(10), Height)
+                          : new RectangleF(0, 0, Width - pw - Theme.S(10), Height);
+            Theme.DrawText(g, Text, Font, Hover ? Color.White : Theme.Text, tr, StringAlignment.Near);
+        }
+    }
+
+    // =====================================================================
+    //  نافذة كلمة السر (داكنة بنفس ثيم البرنامج)
+    // =====================================================================
+    public class PasswordDialog : Form
+    {
+        readonly TextBox _box = new TextBox();
+        readonly string _prompt, _error;
+
+        PasswordDialog(string prompt, string error)
+        {
+            _prompt = prompt; _error = error;
+            FormBorderStyle = FormBorderStyle.None;
+            StartPosition = FormStartPosition.CenterScreen;
+            ShowInTaskbar = false;
+            TopMost = true;
+            BackColor = Theme.Card;
+            ClientSize = new Size(Theme.S(300), Theme.S(178));
+            KeyPreview = true;
+
+            _box.UseSystemPasswordChar = true;
+            _box.BorderStyle = BorderStyle.FixedSingle;
+            _box.BackColor = Theme.Bg;
+            _box.ForeColor = Theme.Text;
+            _box.Font = Theme.Font(12f);
+            _box.Bounds = new Rectangle(Theme.S(20), Theme.S(70), Theme.S(260), Theme.S(30));
+            _box.TextAlign = HorizontalAlignment.Center;
+
+            var ok = new GradientButton { Text = L.T("pw_ok"), Font = Theme.Font(10f, FontStyle.Bold), Bounds = new Rectangle(Theme.S(20), Theme.S(124), Theme.S(125), Theme.S(36)) };
+            var cancel = new OutlineButton { Text = L.T("pw_cancel"), Color = Theme.Muted, Bounds = new Rectangle(Theme.S(155), Theme.S(124), Theme.S(125), Theme.S(36)) };
+            if (L.Ar) { var t = ok.Left; ok.Left = cancel.Left; cancel.Left = t; }
+            ok.Click += (s, e) => { DialogResult = DialogResult.OK; Close(); };
+            cancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
+            KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter) { DialogResult = DialogResult.OK; Close(); }
+                if (e.KeyCode == Keys.Escape) { DialogResult = DialogResult.Cancel; Close(); }
+            };
+            Controls.AddRange(new Control[] { _box, ok, cancel });
+            Shown += (s, e) => _box.Focus();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var g = e.Graphics; Theme.HQ(g);
+            using (var p = new Pen(Theme.Accent, 1.5f)) g.DrawRectangle(p, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+            using (var f = Theme.Font(11f, FontStyle.Bold))
+                Theme.DrawText(g, "🔒  " + _prompt, f, Theme.Text, new RectangleF(Theme.S(16), Theme.S(14), ClientSize.Width - Theme.S(32), Theme.S(26)));
+            if (!string.IsNullOrEmpty(_error))
+                using (var f2 = Theme.Font(8.5f))
+                    Theme.DrawText(g, _error, f2, Theme.Red, new RectangleF(Theme.S(16), Theme.S(42), ClientSize.Width - Theme.S(32), Theme.S(22)));
+            using (var f3 = Theme.Font(7.5f))
+                Theme.DrawText(g, "USB Guard", f3, Theme.Muted, new RectangleF(0, Theme.S(104), ClientSize.Width, Theme.S(18)));
+        }
+
+        /// <summary>يرجع النص او null اذا الغى</summary>
+        public static string Ask(IWin32Window owner, string prompt, string error = null)
+        {
+            using var d = new PasswordDialog(prompt, error);
+            return d.ShowDialog(owner) == DialogResult.OK ? d._box.Text : null;
         }
     }
 }

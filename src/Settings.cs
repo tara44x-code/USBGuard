@@ -17,6 +17,15 @@ namespace USBGuard
         public static bool SelfProtect { get => GetBool("SelfProtect", true); set => SetBool("SelfProtect", value); }
         public static bool AutoPcClean { get => GetBool("AutoPcClean", true); set => SetBool("AutoPcClean", value); }
         public static string LastPcScan { get => GetStr("LastPcScan", "");    set => SetStr("LastPcScan", value); }
+        // v1.3
+        public static bool Realtime    { get => GetBool("Realtime", true);    set => SetBool("Realtime", value); }
+        public static bool GameMode    { get => GetBool("GameMode", true);    set => SetBool("GameMode", value); }
+        public static bool UsbReadOnly { get => GetBool("UsbReadOnly", false); set => SetBool("UsbReadOnly", value); }
+        public static int  ScheduleMode { get => GetInt("ScheduleMode", 0);   set => SetInt("ScheduleMode", value); } // 0 ايقاف، 1 يومي، 2..8 اسبوعي (الاحد..السبت)
+        public static int  ScheduleHour { get => GetInt("ScheduleHour", 3);   set => SetInt("ScheduleHour", value); }
+        public static string LastScheduledRun { get => GetStr("LastScheduledRun", ""); set => SetStr("LastScheduledRun", value); }
+        public static string PasswordHash { get => GetStr("PwHash", "");     set => SetStr("PwHash", value); }
+        public static string PasswordSalt { get => GetStr("PwSalt", "");     set => SetStr("PwSalt", value); }
         public static int  TotalThreats{ get => GetInt("TotalThreats", 0);    set => SetInt("TotalThreats", value); }
         public static int  TotalRestored{get => GetInt("TotalRestored", 0);   set => SetInt("TotalRestored", value); }
         public static string LastScan  { get => GetStr("LastScan", "");       set => SetStr("LastScan", value); }

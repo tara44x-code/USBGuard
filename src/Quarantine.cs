@@ -247,6 +247,9 @@ namespace USBGuard
         public int Threats { get; set; }
         public int Restored { get; set; }
         public List<string> Items { get; set; } = new List<string>();
+        public string Report { get; set; }
+        public string Duration { get; set; }
+        public long Files { get; set; }
     }
 
     public static class History

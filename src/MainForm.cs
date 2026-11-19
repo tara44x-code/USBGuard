@@ -608,13 +608,39 @@ namespace USBGuard
             }
             void Row(Control t) { t.Bounds = R(24, y, W - 48, 32); c.Controls.Add(t); y += 33; }
 
-            Header(_hdrProtect);
+            // ---- حول البرنامج + المطور + التحديث: بأعلى الصفحة حتى يبين فوراً ----
+            Header(_hdrAbout);
+            _about.Logo = _logo;
+            int mascotW = W - 110;
+            int mascotH = (int)Math.Round(mascotW * _mascot.AspectRatio);
+            _about.Bounds = R(20, y, W - 40, 146 + mascotH);
+            _mascot.Bounds = R((W - 40 - mascotW) / 2, 140, mascotW, mascotH);
+            _about.Controls.Add(_mascot);
+            _dev.Bounds = R(10, 114, W - 60, 24); // داخل بطاقة "حول"
+            _dev.Font = Theme.Font(9.5f, FontStyle.Bold);
+            _dev.Normal = Theme.Accent2;
+            _dev.HoverColor = Theme.Strong;
+            _dev.Click += (s, e) => SystemTools.OpenUrl(SystemTools.DeveloperUrl);
+            _dev.BackColor = Color.Transparent;
+            _about.Controls.Add(_dev);
+            y += 158 + mascotH;
+
+            int bw = (W - 40 - 10) / 2;
+            _btnUpdate.Bounds = R(20, y, bw, 42);
+            _btnRepo.Bounds = R(20 + bw + 10, y, bw, 42);
+            _btnRepo.Color = Theme.Accent;
+            _btnUpdate.Click += async (s, e) => await CheckUpdates(manual: true);
+            _btnRepo.Click += (s, e) => SystemTools.OpenUrl(SystemTools.RepoUrl);
+            y += 56;
+            c.Controls.AddRange(new Control[] { _about, _btnUpdate, _btnRepo });
+
+            y += 4; Header(_hdrProtect);
             Row(_tRealtime); Row(_tRansom); Row(_tSelf); Row(_tGame); Row(_tUsbRo);
             y += 8; Header(_hdrScan);
             Row(_tAuto); Row(_tDeep); Row(_tPc); Row(_cSchedule); Row(_cHour);
             y += 8; Header(_hdrGeneral);
             Row(_tStartup); Row(_tUpdate); Row(_tPassword); Row(_cAccent); Row(_tLight);
-            y += 8; Header(_hdrAbout);
+            y += 10;
 
             _tStartup.SetSilently(Settings.Startup);
             _tAuto.SetSilently(Settings.AutoScan);
@@ -684,35 +710,15 @@ namespace USBGuard
                 UpdateScheduleRows();
             };
 
-            _about.Logo = _logo;
-            int mascotH = (int)Math.Round((W - 60) * _mascot.AspectRatio);
-            _about.Bounds = R(20, y, W - 40, 146 + mascotH);
-            _mascot.Bounds = R(10, 140, W - 60, mascotH);
-            _about.Controls.Add(_mascot);
-            _dev.Bounds = R(10, 114, W - 60, 24); // داخل بطاقة "حول"
-            _dev.Font = Theme.Font(9.5f, FontStyle.Bold);
-            _dev.Normal = Theme.Accent2;
-            _dev.HoverColor = Theme.Strong;
-            _dev.Click += (s, e) => SystemTools.OpenUrl(SystemTools.DeveloperUrl);
-            _dev.BackColor = Color.Transparent;
-            _about.Controls.Add(_dev);
-            y += 158 + mascotH;
-
-            int bw = (W - 40 - 10) / 2;
-            _btnUpdate.Bounds = R(20, y, bw, 42);
-            _btnRepo.Bounds = R(20 + bw + 10, y, bw, 42);
-            _btnRepo.Color = Theme.Accent;
-            _btnUpdate.Click += async (s, e) => await CheckUpdates(manual: true);
-            _btnRepo.Click += (s, e) => SystemTools.OpenUrl(SystemTools.RepoUrl);
-            y += 56;
 
             _lnkUninstall.Bounds = R(20, y, W - 40, 22);
             _lnkUninstall.HoverColor = Theme.Red;
             _lnkUninstall.Click += (s, e) => DoUninstall();
             y += 40;
 
-            c.Controls.AddRange(new Control[] { _about, _btnUpdate, _btnRepo, _lnkUninstall });
+            c.Controls.Add(_lnkUninstall);
             _sScroll.SetContentHeight(Theme.S(y));
+            _sScroll.HookChildren();
             p.Controls.AddRange(new Control[] { _sTitle, _sScroll });
         }
 

@@ -1008,26 +1008,116 @@ namespace USBGuard
     public class ScrollPanel : DoubleBufferedPanel, IWheelScrollable
     {
         public readonly Panel Content = new DoubleBufferedPanel { BackColor = Color.Transparent, Location = Point.Empty };
+        readonly ScrollTrack _track;
         int _dragY = -1, _dragTop;
 
         public ScrollPanel()
         {
             BackColor = Color.Transparent;
+            SetStyle(ControlStyles.Selectable, true);
+            TabStop = true;
+            _track = new ScrollTrack(this);
             Controls.Add(Content);
+            Controls.Add(_track);
+            _track.BringToFront();
         }
+
+        public int MaxScroll => Math.Max(0, Content.Height - Height);
+        public int Offset => -Content.Top;
 
         public void SetContentHeight(int h)
         {
             Content.Size = new Size(Width, Math.Max(h, Height));
             Content.Top = 0;
+            LayoutTrack();
         }
 
-        public void WheelScroll(int delta)
+        protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutTrack(); }
+
+        void LayoutTrack()
         {
-            int min = Math.Min(0, Height - Content.Height);
-            int top = Content.Top + Math.Sign(delta) * Theme.S(60);
-            Content.Top = Math.Max(min, Math.Min(0, top));
+            if (_track == null) return;
+            int tw = Theme.S(8);
+            _track.Bounds = new Rectangle(L.Ar ? Theme.S(2) : Width - tw - Theme.S(2), Theme.S(2), tw, Height - Theme.S(4));
+            _track.Visible = MaxScroll > 0;
+            _track.BringToFront();
+        }
+
+        public void ScrollTo(int offset)
+        {
+            offset = Math.Max(0, Math.Min(MaxScroll, offset));
+            if (-Content.Top == offset) return;
+            Content.Top = -offset;
+            _track.Invalidate();
             Invalidate(true);
+        }
+
+        public void WheelScroll(int delta) => ScrollTo(Offset - Math.Sign(delta) * Theme.S(60));
+
+        protected override void OnMouseWheel(MouseEventArgs e) { WheelScroll(e.Delta); base.OnMouseWheel(e); }
+
+        /// <summary>يربط كل العناصر: المرور يعطي تركيز للعجلة، والسحب على المساحات الفارغة يمرر</summary>
+        public void HookChildren() => Hook(Content);
+
+        void Hook(Control c)
+        {
+            c.MouseEnter += (s, e) => { if (!Focused && FindForm()?.ActiveControl is TextBox == false) Focus(); };
+            c.MouseWheel += (s, e) => { if (!Focused) WheelScroll(e.Delta); };
+            if (c is Panel || c is TextBlock)
+            {
+                c.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) { _dragY = Cursor.Position.Y; _dragTop = Offset; } };
+                c.MouseMove += (s, e) => { if (_dragY >= 0 && e.Button == MouseButtons.Left) ScrollTo(_dragTop - (Cursor.Position.Y - _dragY)); };
+                c.MouseUp += (s, e) => _dragY = -1;
+            }
+            foreach (Control ch in c.Controls) Hook(ch);
+        }
+
+        // شريط التمرير الظاهر
+        class ScrollTrack : PaintedControl
+        {
+            readonly ScrollPanel _p;
+            int _grab = -1, _grabOffset;
+            public ScrollTrack(ScrollPanel p) { _p = p; Cursor = Cursors.Hand; }
+
+            RectangleF Thumb()
+            {
+                float h = Height;
+                float ch = Math.Max(1, _p.Content.Height);
+                float th = Math.Max(Theme.S(30), h * _p.Height / ch);
+                float ty = _p.MaxScroll == 0 ? 0 : (h - th) * _p.Offset / _p.MaxScroll;
+                return new RectangleF(1, ty, Width - 2, th);
+            }
+
+            protected override void OnMouseDown(MouseEventArgs e)
+            {
+                var t = Thumb();
+                if (t.Contains(e.Location)) { _grab = e.Y; _grabOffset = _p.Offset; }
+                else _p.ScrollTo(_p.Offset + (e.Y < t.Y ? -_p.Height : _p.Height) * 3 / 4);
+                Invalidate();
+                base.OnMouseDown(e);
+            }
+            protected override void OnMouseMove(MouseEventArgs e)
+            {
+                if (_grab >= 0 && e.Button == MouseButtons.Left)
+                {
+                    var t = Thumb();
+                    float range = Math.Max(1, Height - t.Height);
+                    _p.ScrollTo(_grabOffset + (int)((e.Y - _grab) * _p.MaxScroll / range));
+                }
+                base.OnMouseMove(e);
+            }
+            protected override void OnMouseUp(MouseEventArgs e) { _grab = -1; base.OnMouseUp(e); }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                var g = e.Graphics; Theme.HQ(g);
+                using (var tp = Theme.Round(new RectangleF(Width / 2f - Theme.S(1.5f), 0, Theme.S(3), Height), Theme.S(1.5f)))
+                using (var tb = new SolidBrush(Color.FromArgb(60, Theme.Muted))) g.FillPath(tb, tp);
+                var t = Thumb();
+                using var p = Theme.Round(t, Width / 2f - 1);
+                using var b = new SolidBrush(Hover || _grab >= 0 ? Theme.Accent2 : Color.FromArgb(170, Theme.Accent));
+                g.FillPath(b, p);
+            }
         }
     }
 

@@ -40,11 +40,13 @@ namespace USBGuard
         // ---------------- page 0: USB ----------------
         readonly StatusRing _ring = new StatusRing();
         readonly TextBlock _title = new TextBlock(), _sub = new TextBlock(), _msg = new TextBlock();
-        readonly Panel _drivesArea = new DoubleBufferedPanel();
-        readonly TextBlock _noDrives = new TextBlock();
+        readonly DriveList _driveList = new DriveList();
         readonly GradientButton _scanBtn = new GradientButton();
-        readonly StatCard _stThreats = new StatCard(), _stRestored = new StatCard(), _stLast = new StatCard();
-        readonly List<DriveRow> _rows = new List<DriveRow>();
+        readonly OutlineButton _pathBtn = new OutlineButton();
+        readonly ContextMenuStrip _pathMenu = new ContextMenuStrip();
+        readonly System.Windows.Forms.Timer _elapsedTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        CancellationTokenSource _cts;
+        DateTime _scanStart;
 
         // ---------------- page 1: PC ----------------
         readonly StatusRing _pcRing = new StatusRing();
@@ -113,7 +115,6 @@ namespace USBGuard
             BuildSettingsPage();
             BuildTray();
             ApplyLanguage();
-            RefreshStats();
             RefreshDrives();
             ShowPage(0);
 
@@ -178,37 +179,67 @@ namespace USBGuard
         {
             var p = _pages[0];
             _ring.Logo = _logo;
-            _ring.Bounds = R(100, 18, 160, 160);
+            _ring.Bounds = R(115, 8, 130, 130);
 
-            _title.Bounds = R(16, 184, W - 32, 28);
+            _title.Bounds = R(16, 142, W - 32, 28);
             _title.Font = Theme.Font(15f, FontStyle.Bold);
-            _sub.Bounds = R(16, 212, W - 32, 18);
+            _sub.Bounds = R(16, 170, W - 32, 18);
             _sub.Font = Theme.Font(9f);
             _sub.Color = Theme.Muted;
 
-            _drivesArea.Bounds = R(20, 244, W - 40, 108);
-            _drivesArea.BackColor = Color.Transparent;
-            _noDrives.Dock = DockStyle.Fill;
-            _noDrives.Font = Theme.Font(9.5f);
-            _noDrives.Color = Theme.Muted;
-            _noDrives.Dashed = true;
-            _drivesArea.Controls.Add(_noDrives);
+            // قائمة الاقراص: الفلاشات + الهاردات
+            _driveList.Bounds = R(20, 198, W - 36, 214);
+            _driveList.SelectionChanged += UpdateScanButtonText;
+            _driveList.ItemActivated += root => { if (!_scanning) StartScan(root); };
 
-            _scanBtn.Bounds = R(20, 364, W - 40, 48);
-            _scanBtn.Click += (s, e) => { if (_selectedRoot != null) StartScan(_selectedRoot); };
+            _scanBtn.Bounds = R(20, 420, W - 40, 46);
+            _scanBtn.Click += (s, e) =>
+            {
+                if (_scanning) { _cts?.Cancel(); _scanBtn.Enabled = false; return; }
+                if (_driveList.SelectedRoot != null) StartScan(_driveList.SelectedRoot);
+            };
 
-            _msg.Bounds = R(16, 416, W - 32, 20);
+            _pathBtn.Bounds = R(20, 474, W - 40, 38);
+            _pathMenu.Renderer = new ToolStripProfessionalRenderer(new DarkColors());
+            _pathMenu.ShowImageMargin = false;
+            _pathBtn.Click += (s, e) => _pathMenu.Show(_pathBtn, new Point(0, _pathBtn.Height));
+
+            _msg.Bounds = R(16, 518, W - 32, 34);
             _msg.Font = Theme.Font(8.5f);
             _msg.Color = Theme.Muted;
 
-            int cw = (W - 40 - 16) / 3;
-            _stThreats.Bounds = R(20, 446, cw, 56);
-            _stRestored.Bounds = R(20 + cw + 8, 446, cw, 56);
-            _stLast.Bounds = R(20 + (cw + 8) * 2, 446, cw, 56);
-            _stThreats.ValueColor = Theme.Amber;
-            _stRestored.ValueColor = Theme.Green;
+            _elapsedTimer.Tick += (s, e) =>
+            {
+                if (_ring.Indeterminate) _ring.CenterText = (DateTime.Now - _scanStart).ToString(@"m\:ss");
+            };
 
-            p.Controls.AddRange(new Control[] { _ring, _title, _sub, _drivesArea, _scanBtn, _msg, _stThreats, _stRestored, _stLast });
+            p.Controls.AddRange(new Control[] { _ring, _title, _sub, _driveList, _scanBtn, _pathBtn, _msg });
+        }
+
+        void RebuildPathMenu()
+        {
+            _pathMenu.Items.Clear();
+            _pathMenu.RightToLeft = L.Ar ? RightToLeft.Yes : RightToLeft.No;
+            _pathMenu.Items.Add(L.T("pick_file"), null, (s, e) =>
+            {
+                using var d = new OpenFileDialog { Title = "USB Guard", CheckFileExists = true, Multiselect = false };
+                if (d.ShowDialog(this) == DialogResult.OK) StartScan(d.FileName);
+            });
+            _pathMenu.Items.Add(L.T("pick_folder"), null, (s, e) =>
+            {
+                using var d = new FolderBrowserDialog { Description = L.T("pick_folder"), ShowNewFolderButton = false };
+                if (d.ShowDialog(this) == DialogResult.OK) StartScan(d.SelectedPath);
+            });
+            foreach (ToolStripItem i in _pathMenu.Items) i.ForeColor = Theme.Text;
+        }
+
+        void UpdateScanButtonText()
+        {
+            if (_scanning) { _scanBtn.Text = L.T("cancel_btn"); return; }
+            var root = _driveList.SelectedRoot;
+            _scanBtn.Text = root == null ? L.T("scan_btn") : L.F("scan_target", root.TrimEnd('\\'));
+            _scanBtn.Enabled = root != null;
+            _scanBtn.Invalidate();
         }
 
         // ==================================================================
@@ -328,7 +359,7 @@ namespace USBGuard
         void RefreshHistory()
         {
             var items = History.Items();
-            _hSub.Text = L.F("q_count", items.Count);
+            _hSub.Text = L.F("q_count", items.Count) + " • " + L.F("totals", Settings.TotalThreats, Settings.TotalRestored);
             _hList.EmptyText = L.T("h_empty");
             _hList.SetItems(items.Select(h => new CardItem
             {
@@ -447,11 +478,9 @@ namespace USBGuard
             _btnLang.Text = L.Ar ? "EN" : "ع";
             _tabs.Labels = new[] { L.T("tab_home"), L.T("tab_pc"), L.T("tab_quar"), L.T("tab_hist"), L.T("tab_settings") };
 
-            _scanBtn.Text = _scanning ? L.T("stop_btn") : L.T("scan_btn");
-            _noDrives.Text = L.T("no_drives");
-            _stThreats.Caption = L.T("st_threats");
-            _stRestored.Caption = L.T("st_restored");
-            _stLast.Caption = L.T("st_last");
+            _driveList.EmptyText = L.T("drives_empty");
+            _pathBtn.Text = L.T("path_btn");
+            RebuildPathMenu();
             if (!_scanning) SetState(_ring.State == GuardState.Scanning ? GuardState.Protected : _ring.State, _lastSub);
 
             _pcBtn.Text = _pcScanning ? L.T("scanning") : L.T("pc_btn");
@@ -487,6 +516,7 @@ namespace USBGuard
 
             RebuildTrayMenu();
             RefreshDrives();
+            UpdateScanButtonText();
             RefreshQuarantine();
             RefreshHistory();
             RefreshPcList();
@@ -541,39 +571,32 @@ namespace USBGuard
         // ==================================================================
         void RefreshDrives()
         {
-            List<DriveInfo> drives;
-            try { drives = DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Removable && SafeReady(d)).ToList(); }
-            catch { drives = new List<DriveInfo>(); }
-
-            foreach (var r in _rows) { _drivesArea.Controls.Remove(r); r.Dispose(); }
-            _rows.Clear();
-
-            if (_selectedRoot == null || !drives.Any(d => d.Name == _selectedRoot))
-                _selectedRoot = drives.FirstOrDefault()?.Name;
-
-            int n = Math.Min(drives.Count, 4);
-            int gap = Theme.S(8);
-            int rowH = n == 0 ? 0 : Math.Min(Theme.S(50), (_drivesArea.Height - gap * (n - 1)) / n);
-
-            for (int i = 0; i < n; i++)
+            var items = new List<DriveItem>();
+            var sysRoot = Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+            try
             {
-                var d = drives[i];
-                var label = SafeLabel(d);
-                var row = new DriveRow
+                foreach (var d in DriveInfo.GetDrives())
                 {
-                    Root = d.Name,
-                    Label = string.IsNullOrWhiteSpace(label) ? (L.Ar ? "فلاشة USB" : "USB Drive") : label,
-                    SizeText = SizeText(d),
-                    Selected = d.Name == _selectedRoot,
-                    Bounds = new Rectangle(0, i * (rowH + gap), _drivesArea.Width, rowH),
-                };
-                row.Click += (s, e) => { _selectedRoot = row.Root; foreach (var x in _rows) x.Selected = x == row; };
-                row.DoubleClick += (s, e) => StartScan(row.Root);
-                _rows.Add(row);
-                _drivesArea.Controls.Add(row);
+                    if (d.DriveType != DriveType.Removable && d.DriveType != DriveType.Fixed) continue;
+                    if (!SafeReady(d)) continue;
+                    int kind = d.DriveType == DriveType.Removable ? 0
+                             : string.Equals(d.Name, sysRoot, StringComparison.OrdinalIgnoreCase) ? 2 : 1;
+                    var label = SafeLabel(d);
+                    var typeName = L.T(kind == 0 ? "drive_usb" : kind == 2 ? "drive_sys" : "drive_hdd");
+                    items.Add(new DriveItem
+                    {
+                        Root = d.Name,
+                        Kind = kind,
+                        Title = string.IsNullOrWhiteSpace(label) ? typeName : $"{label} • {typeName}",
+                        Sub = SizeText(d),
+                    });
+                }
             }
-            _noDrives.Visible = n == 0;
-            _scanBtn.Enabled = n > 0 && !_scanning;
+            catch { }
+            // الفلاشات اولاً
+            items = items.OrderBy(i => i.Kind == 0 ? 0 : 1).ThenBy(i => i.Root).ToList();
+            _driveList.SetItems(items);
+            UpdateScanButtonText();
         }
 
         static bool SafeReady(DriveInfo d) { try { return d.IsReady; } catch { return false; } }
@@ -589,66 +612,83 @@ namespace USBGuard
             catch { return ""; }
         }
 
-        void RefreshStats()
-        {
-            _stThreats.Value = Settings.TotalThreats.ToString();
-            _stRestored.Value = Settings.TotalRestored.ToString();
-            var last = Settings.LastScan;
-            _stLast.Value = string.IsNullOrEmpty(last) ? L.T("never") : last;
-            _stThreats.Invalidate(); _stRestored.Invalidate(); _stLast.Invalidate();
-        }
-
         // ==================================================================
         //  فحص الفلاشة
         // ==================================================================
-        async void StartScan(string root)
+        async void StartScan(string target)
         {
-            root = Scanner.NormalizeRoot(root);
-            if (root == null) return;
+            target = Scanner.NormalizePath(target);
+            if (target == null) return;
 
             if (_scanning)
             {
-                if (!_pending.Contains(root)) _pending.Enqueue(root);
+                if (!_pending.Contains(target)) _pending.Enqueue(target);
                 return;
             }
 
-            if (!Scanner.IsScannable(root, out var reason))
+            if (!Scanner.CanScan(target, out var reason))
             {
                 Notify(reason, ToolTipIcon.Warning, forceDialog: Visible);
                 return;
             }
 
+            bool usbMode = Scanner.IsRemovableRoot(target);
             _scanning = true;
-            _selectedRoot = root;
-            foreach (var x in _rows) x.Selected = x.Root == root;
-            _scanBtn.Enabled = false;
-            _scanBtn.Text = L.T("stop_btn");
+            _cts = new CancellationTokenSource();
+            var ct = _cts.Token;
+            if (Scanner.IsDriveRoot(target)) _driveList.Select(target);
+            _scanBtn.Enabled = true;
+            _scanBtn.Text = L.T("cancel_btn");
+            _pathBtn.Enabled = false;
             _ring.Progress = 0;
-            SetState(GuardState.Scanning, root);
+            _ring.Indeterminate = !usbMode;
+            _ring.CenterText = null;
+            _scanStart = DateTime.Now;
+            _elapsedTimer.Start();
+            SetState(GuardState.Scanning, target);
+            if (!usbMode && Scanner.IsDriveRoot(target)) { _msg.Text = L.T("long_scan"); _msg.Invalidate(); }
 
             var progress = new Progress<(int pct, string msg)>(p =>
             {
-                _ring.Progress = p.pct;
+                if (p.pct < 0) _ring.Indeterminate = true;
+                else if (usbMode) { _ring.Indeterminate = false; _ring.Progress = p.pct; }
                 _msg.Text = p.msg; _msg.Invalidate();
             });
 
             var deep = Settings.DeepScan;
             var result = await Task.Run(() =>
             {
-                SystemTools.RepairSystem();
-                return Scanner.Scan(root, deep, progress);
+                if (usbMode)
+                {
+                    SystemTools.RepairSystem();
+                    return Scanner.Scan(target, deep, progress, ct);
+                }
+                return Scanner.ScanPath(target, deep, progress, ct);
             });
 
             _scanning = false;
-            Settings.TotalThreats += result.Threats;
+            _elapsedTimer.Stop();
+            _ring.Indeterminate = false;
+            _ring.CenterText = null;
+            _pathBtn.Enabled = true;
+
+            if (result.Cancelled)
+            {
+                SetState(GuardState.Protected);
+                _msg.Text = L.T("res_cancelled"); _msg.Invalidate();
+                UpdateScanButtonText();
+                _pending.Clear();
+                return;
+            }
+
+            Settings.TotalThreats += result.Threats + result.DefenderThreats.Count;
             Settings.TotalRestored += result.Restored;
             Settings.LastScan = DateTime.Now.ToString("HH:mm");
-            RefreshStats();
             History.Add(new ScanRecord
             {
                 Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
-                Target = root,
-                Threats = result.Threats + (result.DefenderFound ? 1 : 0),
+                Target = target,
+                Threats = result.Threats + result.DefenderThreats.Count,
                 Restored = result.Restored,
                 Items = result.Details.Take(20).ToList(),
             });
@@ -656,24 +696,24 @@ namespace USBGuard
             string summary;
             if (result.HadThreats || result.Restored > 0)
             {
-                summary = L.F("res_found", result.Threats, result.Restored);
-                if (result.DefenderFound) summary += " • " + L.T("res_defender");
+                summary = L.F("res_found", result.Threats + result.DefenderThreats.Count, result.Restored);
+                if (result.DefenderThreats.Count > 0) summary += " • " + L.F("res_defender_n", string.Join("، ", result.DefenderThreats.Take(3)));
                 SetState(result.HadThreats ? GuardState.Threat : GuardState.Clean, summary);
-                Notify($"{root}  {summary}", result.HadThreats ? ToolTipIcon.Warning : ToolTipIcon.Info);
-                // الفلاشة كانت ملوثة = ممكن الحاسبة اتلوثت: فحص سريع للحاسبة
+                Notify($"{target}  {summary}", result.HadThreats ? ToolTipIcon.Warning : ToolTipIcon.Info);
+                // كان اكو فايروس = ممكن الحاسبة اتلوثت: فحص سريع للحاسبة
                 if (result.HadThreats && Settings.AutoPcClean) StartPcScan(silent: true);
             }
             else
             {
                 summary = L.T("res_clean");
                 SetState(GuardState.Clean, summary);
-                if (!Visible) Notify($"{root}  {summary}", ToolTipIcon.Info);
+                if (!Visible) Notify($"{target}  {summary}", ToolTipIcon.Info);
             }
-            _msg.Text = L.T("step_done") + " • " + DateTime.Now.ToString("HH:mm:ss"); _msg.Invalidate();
+            var extra = result.FilesChecked > 0 ? L.F("res_files", result.FilesChecked.ToString("N0")) + " • " : "";
+            if (deep && !result.DefenderRan) extra += L.T("def_unavailable") + " • ";
+            _msg.Text = extra + L.T("step_done") + " " + DateTime.Now.ToString("HH:mm:ss"); _msg.Invalidate();
 
-            _scanBtn.Text = L.T("scan_btn");
             RefreshDrives();
-
             if (_pending.Count > 0) StartScan(_pending.Dequeue());
         }
 
@@ -696,12 +736,12 @@ namespace USBGuard
                 _pcMsg.Text = p.msg; _pcMsg.Invalidate();
             });
 
-            var r = await Task.Run(() => PcCleaner.Scan(progress));
+            var deepPc = Settings.DeepScan;
+            var r = await Task.Run(() => PcCleaner.Scan(deepPc, progress));
 
             _pcScanning = false;
             Settings.LastPcScan = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
             Settings.TotalThreats += r.Threats;
-            RefreshStats();
             _lastPcDetails = r.Details.ToList();
             History.Add(new ScanRecord
             {
@@ -936,7 +976,7 @@ namespace USBGuard
 
             if (_startScan != null) { ShowMain(); ShowPage(0); StartScan(_startScan); }
             else if (Settings.AutoScan)
-                foreach (var r in _rows.Select(x => x.Root).ToList()) StartScan(r);
+                foreach (var r in _driveList.Items.Where(x => x.Kind == 0).Select(x => x.Root).ToList()) StartScan(r);
 
             if (Settings.AutoUpdate)
             {

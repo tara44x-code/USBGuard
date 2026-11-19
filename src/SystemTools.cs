@@ -157,7 +157,7 @@ namespace USBGuard
             Settings.Startup = false;
             SelfProtect.SignalQuit();
             SetStartup(false);
-            try { Registry.ClassesRoot.DeleteSubKeyTree(@"Drive\shell\USBGuard", false); } catch { }
+            foreach (var (key, _) in MenuKeys) { try { Registry.ClassesRoot.DeleteSubKeyTree(key, false); } catch { } }
             try { Registry.LocalMachine.DeleteSubKeyTree(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\USBGuard", false); } catch { }
             try { File.Delete(StartMenuLink); } catch { }
             try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\SatLink\USBGuard", false); } catch { }
@@ -179,19 +179,40 @@ namespace USBGuard
         // ------------------------------------------------------------------
         // 4) القائمة اليمنى على الفلاشة (Drive context menu)
         // ------------------------------------------------------------------
+        // الاقراص: %1 بدون علامات تنصيص لأن "E:\" تخرب قراءة الاوامر. الملفات والمجلدات: مع علامات تنصيص (فيها فراغات)
+        static readonly (string key, bool quote)[] MenuKeys =
+        {
+            (@"Drive\shell\USBGuard", false),
+            (@"*\shell\USBGuard", true),
+            (@"Directory\shell\USBGuard", true),
+        };
+
         public static void RegisterContextMenu()
         {
-            try
+            foreach (var (key, quote) in MenuKeys)
             {
-                using var k = Registry.ClassesRoot.CreateSubKey(@"Drive\shell\USBGuard");
-                k.SetValue("", L.T("menu_scan"));
-                k.SetValue("MUIVerb", L.T("menu_scan"));
-                k.SetValue("Icon", $"\"{InstalledExe}\",0");
-                k.SetValue("Position", "Top");
-                using var c = k.CreateSubKey("command");
-                c.SetValue("", $"\"{InstalledExe}\" --scan %1");
+                try
+                {
+                    using var k = Registry.ClassesRoot.CreateSubKey(key);
+                    k.SetValue("", L.T("menu_scan"));
+                    k.SetValue("MUIVerb", L.T("menu_scan"));
+                    k.SetValue("Icon", $"\"{InstalledExe}\",0");
+                    k.SetValue("Position", "Top");
+                    using var c = k.CreateSubKey("command");
+                    c.SetValue("", quote ? $"\"{InstalledExe}\" --scan \"%1\"" : $"\"{InstalledExe}\" --scan %1");
+                }
+                catch (Exception ex) { Settings.Log("فشل تسجيل القائمة اليمنى: " + ex.Message); }
             }
-            catch (Exception ex) { Settings.Log("فشل تسجيل القائمة اليمنى: " + ex.Message); }
+        }
+
+        public static bool ContextMenuRegistered()
+        {
+            foreach (var (key, _) in MenuKeys)
+            {
+                try { using var k = Registry.ClassesRoot.OpenSubKey(key + "\\command"); if (k == null) return false; }
+                catch { return false; }
+            }
+            return true;
         }
 
         // ------------------------------------------------------------------

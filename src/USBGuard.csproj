@@ -15,7 +15,7 @@
     <DebugType>none</DebugType>
 
     <!-- رقم الاصدار: غيّره هنا وارفع للكيت هوب = يطلع تحديث جديد تلقائياً -->
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
 
     <Product>USB Guard</Product>
     <AssemblyTitle>USB Guard</AssemblyTitle>

@@ -193,6 +193,10 @@ namespace USBGuard
 
         public GuardState State { get => _state; set { _state = value; Invalidate(); } }
         public bool Animate { get => _t.Enabled; set { _t.Enabled = value; } }
+        bool _indeterminate;
+        public bool Indeterminate { get => _indeterminate; set { _indeterminate = value; Invalidate(); } }
+        string _center;
+        public string CenterText { get => _center; set { _center = value; Invalidate(); } }
         public int Progress { get => _progress; set { _progress = Math.Max(0, Math.Min(100, value)); Invalidate(); } }
 
         public StatusRing()
@@ -236,7 +240,13 @@ namespace USBGuard
 
             using (var pen = new Pen(c, Theme.S(5)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
             {
-                if (_state == GuardState.Scanning)
+                if (_state == GuardState.Scanning && _indeterminate)
+                {
+                    g.DrawArc(pen, ring, _spin * 1.5f, 110);
+                    using var spinPen2 = new Pen(Color.FromArgb(160, Theme.Accent2), Theme.S(2)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                    g.DrawArc(spinPen2, RectangleF.Inflate(ring, -Theme.S(9), -Theme.S(9)), -_spin, 70);
+                }
+                else if (_state == GuardState.Scanning)
                 {
                     float sweep = Math.Max(8, 360f * _progress / 100f);
                     g.DrawArc(pen, ring, -90, sweep);
@@ -252,12 +262,13 @@ namespace USBGuard
             // الشعار
             if (Logo != null)
             {
-                float ls = inner.Width * 0.72f;
+                float ls = inner.Width * 1.18f; // اكبر من الدائرة حتى الخلفية الداكنة للشعار تملي الدائرة بدون مربع
                 var lr = new RectangleF(inner.X + (inner.Width - ls) / 2f, inner.Y + (inner.Height - ls) / 2f, ls, ls);
                 if (_state == GuardState.Scanning)
                 {
-                    using var f = Theme.Font(20f, FontStyle.Bold);
-                    Theme.DrawText(g, _progress + "%", f, Color.White, inner);
+                    var txt = _center ?? (_indeterminate ? "" : _progress + "%");
+                    using var f = Theme.Font(txt.Length > 4 ? 15f : 20f, FontStyle.Bold);
+                    Theme.DrawText(g, txt, f, Color.White, inner);
                 }
                 else
                 {
@@ -781,6 +792,151 @@ namespace USBGuard
                 g.DrawString(Line1, f, b, new RectangleF(0, Theme.S(68), Width, Theme.S(22)), sf);
             using (var f2 = Theme.Font(8f))
                 Theme.DrawText(g, Line2, f2, Theme.Muted, new RectangleF(Theme.S(10), Theme.S(90), Width - Theme.S(20), Theme.S(18)));
+        }
+    }
+}
+
+
+namespace USBGuard
+{
+    using System.Collections.Generic;
+    using System.Linq;
+
+    public class DriveItem
+    {
+        public string Root;       // E:\
+        public string Title;      // اسم القرص
+        public string Sub;        // المساحة
+        public int Kind;          // 0 فلاشة، 1 قرص محلي، 2 قرص النظام
+    }
+
+    /// <summary>قائمة الاقراص (فلاشات + هاردات) قابلة للتمرير والاختيار</summary>
+    public class DriveList : PaintedControl
+    {
+        List<DriveItem> _items = new List<DriveItem>();
+        int _scroll, _hover = -1;
+        public string SelectedRoot;
+        public string EmptyText = "";
+        public event Action SelectionChanged;
+        public event Action<string> ItemActivated;
+
+        public DriveList() { SetStyle(ControlStyles.Selectable, true); TabStop = true; Cursor = Cursors.Hand; }
+
+        public IReadOnlyList<DriveItem> Items => _items;
+
+        public void SetItems(List<DriveItem> items)
+        {
+            _items = items;
+            if (SelectedRoot == null || !_items.Any(i => i.Root == SelectedRoot))
+                SelectedRoot = (_items.FirstOrDefault(i => i.Kind == 0) ?? _items.FirstOrDefault())?.Root;
+            _scroll = Math.Min(_scroll, MaxScroll);
+            Invalidate();
+        }
+
+        public void Select(string root) { SelectedRoot = root; Invalidate(); SelectionChanged?.Invoke(); }
+
+        int RowH => Theme.S(48);
+        int Gap => Theme.S(6);
+        int MaxScroll => Math.Max(0, _items.Count * (RowH + Gap) - Gap - Height);
+
+        int IndexAt(Point p)
+        {
+            int i = (p.Y + _scroll) / (RowH + Gap);
+            int within = (p.Y + _scroll) % (RowH + Gap);
+            return i >= 0 && i < _items.Count && within <= RowH ? i : -1;
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { Focus(); base.OnMouseEnter(e); }
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            _scroll = Math.Max(0, Math.Min(MaxScroll, _scroll - Math.Sign(e.Delta) * Theme.S(54)));
+            Invalidate(); base.OnMouseWheel(e);
+        }
+        int _dragY = -1, _dragScroll; bool _dragged;
+        protected override void OnMouseDown(MouseEventArgs e) { _dragY = e.Y; _dragScroll = _scroll; _dragged = false; base.OnMouseDown(e); }
+        protected override void OnMouseUp(MouseEventArgs e) { _dragY = -1; base.OnMouseUp(e); }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            if (_dragY >= 0 && e.Button == MouseButtons.Left)
+            {
+                int d = e.Y - _dragY;
+                if (Math.Abs(d) > Theme.S(4)) _dragged = true;
+                if (_dragged) { _scroll = Math.Max(0, Math.Min(MaxScroll, _dragScroll - d)); Invalidate(); return; }
+            }
+            int h = IndexAt(e.Location);
+            if (h != _hover) { _hover = h; Invalidate(); }
+            base.OnMouseMove(e);
+        }
+        protected override void OnMouseLeave(EventArgs e) { _hover = -1; base.OnMouseLeave(e); }
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            if (!_dragged) { int i = IndexAt(e.Location); if (i >= 0) Select(_items[i].Root); }
+            base.OnMouseClick(e);
+        }
+        protected override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            int i = IndexAt(e.Location);
+            if (i >= 0) ItemActivated?.Invoke(_items[i].Root);
+            base.OnMouseDoubleClick(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics; Theme.HQ(g);
+            if (_items.Count == 0)
+            {
+                var er = new RectangleF(1, 1, Width - 2, Math.Min(Height - 2, Theme.S(90)));
+                using (var p = Theme.Round(er, Theme.S(12)))
+                using (var pen = new Pen(Theme.Border, 1.4f) { DashStyle = DashStyle.Dash }) g.DrawPath(pen, p);
+                using var f = Theme.Font(9.5f);
+                Theme.DrawText(g, EmptyText, f, Theme.Muted, er);
+                return;
+            }
+            using var fT = Theme.Font(10f, FontStyle.Bold);
+            using var fS = Theme.Font(8f);
+            using var fL = Theme.Font(9.5f, FontStyle.Bold);
+            float barSpace = MaxScroll > 0 ? Theme.S(8) : 0;
+
+            for (int i = 0; i < _items.Count; i++)
+            {
+                var it = _items[i];
+                float y = i * (RowH + Gap) - _scroll;
+                if (y + RowH < 0 || y > Height) continue;
+                bool sel = it.Root == SelectedRoot;
+                var r = new RectangleF(L.Ar ? barSpace + 0.5f : 0.5f, y + 0.5f, Width - barSpace - 1.5f, RowH - 1);
+                using (var p = Theme.Round(r, Theme.S(12)))
+                {
+                    using (var b = new SolidBrush(sel || i == _hover ? Theme.CardHover : Theme.Card)) g.FillPath(b, p);
+                    using var pen = new Pen(sel ? Theme.Accent : Theme.Border, sel ? Theme.S(1.6f) : 1f);
+                    g.DrawPath(pen, p);
+                }
+
+                float isz = RowH - Theme.S(16);
+                float ix = L.Ar ? r.Right - isz - Theme.S(10) : r.X + Theme.S(10);
+                var ir = new RectangleF(ix, y + (RowH - isz) / 2f, isz, isz);
+                Color c1 = it.Kind == 0 ? Theme.Accent : it.Kind == 2 ? Color.FromArgb(124, 58, 237) : Color.FromArgb(71, 85, 105);
+                Color c2 = it.Kind == 0 ? Theme.Accent2 : it.Kind == 2 ? Color.FromArgb(168, 85, 247) : Color.FromArgb(100, 116, 139);
+                using (var ip = Theme.Round(ir, Theme.S(8)))
+                using (var ib = new LinearGradientBrush(ir, c1, c2, 45f)) g.FillPath(ib, ip);
+                Theme.DrawText(g, it.Root.TrimEnd('\\'), fL, Color.White, ir);
+
+                float tx = L.Ar ? r.X + Theme.S(12) : ix + isz + Theme.S(10);
+                float tw = r.Width - isz - Theme.S(34);
+                Theme.DrawText(g, it.Title, fT, Theme.Text, new RectangleF(tx, y + Theme.S(5), tw, RowH / 2f - Theme.S(3)), StringAlignment.Near, StringAlignment.Far);
+                Theme.DrawText(g, it.Sub, fS, Theme.Muted, new RectangleF(tx, y + RowH / 2f + Theme.S(1), tw, RowH / 2f - Theme.S(5)), StringAlignment.Near, StringAlignment.Near);
+            }
+
+            if (MaxScroll > 0)
+            {
+                float trackH = Height - Theme.S(4);
+                float contentH = _items.Count * (RowH + Gap) - Gap;
+                float thumbH = Math.Max(Theme.S(24), trackH * Height / contentH);
+                float thumbY = Theme.S(2) + (trackH - thumbH) * _scroll / MaxScroll;
+                float tx = L.Ar ? 0 : Width - Theme.S(4);
+                using var tp = Theme.Round(new RectangleF(tx, thumbY, Theme.S(3), thumbH), Theme.S(1.5f));
+                using var tb = new SolidBrush(Color.FromArgb(120, Theme.Muted));
+                g.FillPath(tb, tp);
+            }
         }
     }
 }

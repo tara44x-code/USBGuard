@@ -73,7 +73,7 @@ namespace USBGuard
                     {
                         mutex.ReleaseMutex();
                         mutex.Dispose();
-                        var extra = scanTarget != null ? $" --scan {scanTarget}" : "";
+                        var extra = scanTarget != null ? $" --scan \"{scanTarget.Trim('"').TrimEnd('\\')}\"" : "";
                         Process.Start(new ProcessStartInfo(SystemTools.InstalledExe, "--installed" + extra) { UseShellExecute = true });
                         return;
                     }

@@ -183,10 +183,7 @@ namespace USBGuard
                     Settings.Log("الحماية الذاتية: التشغيل التلقائي انحذف ورجّعناه");
                 }
 
-                using (var k = Registry.ClassesRoot.OpenSubKey(@"Drive\shell\USBGuard\command"))
-                {
-                    if (k == null) SystemTools.RegisterContextMenu();
-                }
+                if (!SystemTools.ContextMenuRegistered()) SystemTools.RegisterContextMenu();
 
                 // اذا الفايروس حجب البرنامج عن طريق IFEO او DisallowRun
                 foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })

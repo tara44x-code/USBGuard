@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace USBGuard
 {
@@ -16,6 +17,9 @@ namespace USBGuard
         public bool DefenderRan;
         public bool DefenderFound;
         public string Error;
+        public bool Cancelled;
+        public long FilesChecked;
+        public readonly List<string> DefenderThreats = new List<string>();
         public readonly List<string> Details = new List<string>();
         public bool HadThreats => Threats > 0 || DefenderFound;
     }
@@ -44,6 +48,51 @@ namespace USBGuard
 
         static readonly string[] Protected = { "system volume information", "$recycle.bin", "autorun.inf" };
 
+        static readonly string[] ScriptExt = { ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta" };
+        static readonly string[] BinExt = { ".exe", ".scr", ".pif", ".com" };
+
+        // نسخة صارمة لكشف فايروس الاختصار على الهارد (حتى ما نمس اختصارات ويندوز الطبيعية مثل PowerShell)
+        static readonly Regex StrictLnk = new Regex(
+            @"wscript|cscript|mshta|\.vbs\b|\.vbe\b|\.jse?\b|\.wsf\b|\.hta\b|cmd(\.exe)?\W{1,6}/c\W{1,6}start\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>يوحّد المسار: "e:" → "E:\" ، ويشيل \ من آخر المجلدات</summary>
+        public static string NormalizePath(string p)
+        {
+            if (string.IsNullOrWhiteSpace(p)) return null;
+            p = p.Trim().Trim('"').Trim();
+            if (p.Length == 2 && p[1] == ':') p += "\\";
+            try { p = Path.GetFullPath(p); } catch { return null; }
+            if (p.Length > 3) p = p.TrimEnd('\\');
+            if (p.Length == 3 && p[1] == ':') p = char.ToUpperInvariant(p[0]) + @":\";
+            return p;
+        }
+
+        public static bool IsDriveRoot(string p) => p != null && p.Length == 3 && p[1] == ':';
+
+        public static bool IsRemovableRoot(string p)
+        {
+            try { return IsDriveRoot(p) && new DriveInfo(p).DriveType == DriveType.Removable; } catch { return false; }
+        }
+
+        public static bool CanScan(string p, out string reason)
+        {
+            reason = null;
+            try
+            {
+                if (IsDriveRoot(p))
+                {
+                    var di = new DriveInfo(p);
+                    if (!di.IsReady) { reason = L.T("not_ready"); return false; }
+                    return true;
+                }
+                if (File.Exists(p) || Directory.Exists(p)) return true;
+                reason = L.T("path_missing");
+                return false;
+            }
+            catch { reason = L.T("not_ready"); return false; }
+        }
+
         public static bool IsScannable(string root, out string reason)
         {
             reason = null;
@@ -65,7 +114,7 @@ namespace USBGuard
             return null;
         }
 
-        public static ScanResult Scan(string root, bool deep, IProgress<(int pct, string msg)> progress)
+        public static ScanResult Scan(string root, bool deep, IProgress<(int pct, string msg)> progress, CancellationToken ct = default)
         {
             var r = new ScanResult { Drive = root };
             void P(int pct, string key) => progress?.Report((pct, L.T(key)));
@@ -156,24 +205,214 @@ namespace USBGuard
                 if (deep)
                 {
                     P(78, "step_defender");
-                    var code = RunDefender(root);
-                    if (code >= 0)
-                    {
-                        r.DefenderRan = true;
-                        r.DefenderFound = code == 2;
-                        if (r.DefenderFound) { r.Details.Add("Windows Defender"); Settings.Log("  Defender لگى تهديدات وعالجها"); }
-                    }
+                    ApplyDefender(r, RunDefender(root, 3, ct, r.DefenderThreats));
                 }
 
                 P(100, "step_done");
                 Settings.Log($"===== انتهى فحص {root}: تهديدات={r.Threats} مسترجع={r.Restored} =====");
             }
+            catch (OperationCanceledException) { r.Cancelled = true; Settings.Log("  تم ايقاف الفحص"); }
             catch (Exception ex)
             {
                 r.Error = ex.Message;
                 Settings.Log("خطأ: " + ex.Message);
             }
             return r;
+        }
+
+        // ==================================================================
+        //  فحص اي هارد / مجلد / ملف (بدون تعديلات الفلاشة الخطرة مثل اظهار كل الملفات)
+        // ==================================================================
+        public static ScanResult ScanPath(string path, bool deep, IProgress<(int pct, string msg)> progress, CancellationToken ct)
+        {
+            var r = new ScanResult { Drive = path };
+            try
+            {
+                Settings.Log($"===== بدء فحص {path} =====");
+                progress?.Report((-1, L.T("step_prepare")));
+
+                // autorun.inf بجذر القرص
+                if (IsDriveRoot(path))
+                {
+                    var inf = Path.Combine(path, "autorun.inf");
+                    if (File.Exists(inf))
+                    {
+                        foreach (var t in AutorunTargets(inf, path))
+                            if ((Path.GetDirectoryName(t).TrimEnd('\\') + "\\").Equals(path, StringComparison.OrdinalIgnoreCase) || IsHiddenSys(SafeAttr(t)))
+                                if (Remove(t, "autorun target", "HDD")) Hit(r, Path.GetFileName(t));
+                        if (Remove(inf, "autorun.inf", "HDD")) Hit(r, "autorun.inf");
+                    }
+                }
+
+                if (Directory.Exists(path))
+                {
+                    var stack = new Stack<DirectoryInfo>();
+                    stack.Push(new DirectoryInfo(path));
+                    long count = 0;
+                    var lastReport = Environment.TickCount;
+                    bool first = true; // المجلد الي اختاره المستخدم نفحصه حتى لو من المستثنيات
+                    while (stack.Count > 0)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var d = stack.Pop();
+                        if (!first && IsExcludedDir(d.FullName)) continue;
+                        first = false;
+                        FileSystemInfo[] entries;
+                        try { entries = d.GetFileSystemInfos(); } catch { continue; }
+                        foreach (var e in entries)
+                        {
+                            if (e is DirectoryInfo sub)
+                            {
+                                if ((sub.Attributes & FileAttributes.ReparsePoint) == 0) stack.Push(sub);
+                                continue;
+                            }
+                            count++;
+                            if (e is FileInfo fi) CheckFile(fi, r);
+                            if (Environment.TickCount - lastReport > 400)
+                            {
+                                lastReport = Environment.TickCount;
+                                progress?.Report((-1, L.F("step_files", count.ToString("N0"))));
+                            }
+                        }
+                    }
+                    r.FilesChecked = count;
+                }
+                else if (File.Exists(path))
+                {
+                    r.FilesChecked = 1;
+                    CheckFile(new FileInfo(path), r);
+                }
+
+                if (deep)
+                {
+                    progress?.Report((-1, L.T("step_defender")));
+                    ApplyDefender(r, RunDefender(path, 3, ct, r.DefenderThreats));
+                }
+                progress?.Report((100, L.T("step_done")));
+                Settings.Log($"===== انتهى فحص {path}: ملفات={r.FilesChecked} تهديدات={r.Threats} Defender={r.DefenderThreats.Count} =====");
+            }
+            catch (OperationCanceledException) { r.Cancelled = true; Settings.Log("  تم ايقاف الفحص"); }
+            catch (Exception ex) { r.Error = ex.Message; Settings.Log("خطأ: " + ex.Message); }
+            return r;
+        }
+
+        static void CheckFile(FileInfo f, ScanResult r)
+        {
+            try
+            {
+                var ext = f.Extension.ToLowerInvariant();
+                var a = f.Attributes;
+                bool hs = IsHiddenSys(a);
+                if (IsUnderSystemDir(f.FullName)) return; // ملفات ويندوز والبرامج يفحصها Defender بس
+
+                if (hs && ScriptExt.Contains(ext))
+                {
+                    if (Remove(f.FullName, "hidden script", "HDD")) Hit(r, f.FullName);
+                }
+                else if (hs && BinExt.Contains(ext))
+                {
+                    if (Remove(f.FullName, "hidden executable", "HDD")) Hit(r, f.FullName);
+                }
+                else if (ext == ".lnk" && f.Length < 64 * 1024 && IsShortcutVirusLnk(f.FullName))
+                {
+                    if (Remove(f.FullName, "shortcut virus", "HDD")) Hit(r, f.FullName);
+                }
+            }
+            catch { }
+        }
+
+        static bool IsHiddenSys(FileAttributes a) => (a & FileAttributes.Hidden) != 0 && (a & FileAttributes.System) != 0;
+
+        static bool IsShortcutVirusLnk(string path)
+        {
+            try
+            {
+                var bytes = File.ReadAllBytes(path);
+                var text = Encoding.Unicode.GetString(bytes) + "\n" + Encoding.ASCII.GetString(bytes);
+                return StrictLnk.IsMatch(text);
+            }
+            catch { return false; }
+        }
+
+        static string[] _excluded;
+        static bool IsExcludedDir(string dir)
+        {
+            _excluded ??= new[]
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Microsoft"),
+                Settings.DataDir,
+            }.Where(x => !string.IsNullOrEmpty(x)).Select(x => x.TrimEnd('\\')).ToArray();
+
+            var name = Path.GetFileName(dir.TrimEnd('\\')).ToLowerInvariant();
+            if (name == "$recycle.bin" || name == "system volume information" || name == "windowsapps" || name == "winsxs") return true;
+            return _excluded.Any(x => dir.TrimEnd('\\').Equals(x, StringComparison.OrdinalIgnoreCase));
+        }
+
+        static bool IsUnderSystemDir(string file)
+        {
+            var win = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd('\\') + "\\";
+            return file.StartsWith(win, StringComparison.OrdinalIgnoreCase)
+                || file.StartsWith(Settings.DataDir.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
+        }
+
+        static void ApplyDefender(ScanResult r, int code)
+        {
+            if (code < 0) return;
+            r.DefenderRan = true;
+            r.DefenderFound = r.DefenderThreats.Count > 0;
+            foreach (var t in r.DefenderThreats) r.Details.Add("Defender: " + t);
+            if (r.DefenderFound) Settings.Log("  Defender لگى: " + string.Join(", ", r.DefenderThreats));
+        }
+
+        /// <summary>
+        /// يشغل Windows Defender. scanType: 1 = سريع (الذاكرة والبرامج الشغالة والتشغيل التلقائي) ، 3 = مسار معين.
+        /// يرجع كود الخروج او -1 اذا Defender مو متوفر. اسماء التهديدات تنضاف لـ threats.
+        /// </summary>
+        public static int RunDefender(string target, int scanType, CancellationToken ct, List<string> threats)
+        {
+            var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            var mp = Path.Combine(pf, @"Windows Defender\MpCmdRun.exe");
+            if (!File.Exists(mp)) return -1;
+
+            string args = scanType == 3
+                ? "-Scan -ScanType 3 -File " + (IsDriveRoot(target) ? target : "\"" + target.TrimEnd('\\') + "\"")
+                : "-Scan -ScanType " + scanType;
+
+            var psi = new ProcessStartInfo(mp, args)
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            };
+            using var p = Process.Start(psi);
+            var output = new StringBuilder();
+            p.OutputDataReceived += (s, e) => { if (e.Data != null) lock (output) output.AppendLine(e.Data); };
+            p.ErrorDataReceived += (s, e) => { };
+            p.BeginOutputReadLine();
+            p.BeginErrorReadLine();
+            using (ct.Register(() => { try { if (!p.HasExited) p.Kill(); } catch { } }))
+            {
+                while (!p.WaitForExit(500))
+                    if (ct.IsCancellationRequested) break;
+            }
+            ct.ThrowIfCancellationRequested();
+            p.WaitForExit();
+
+            string text; lock (output) text = output.ToString();
+            foreach (Match m in Regex.Matches(text, @"^\s*Threat\s*:\s*(.+?)\s*$", RegexOptions.Multiline))
+            {
+                var name = m.Groups[1].Value.Trim();
+                if (name.Length > 0 && !threats.Contains(name)) threats.Add(name);
+            }
+            // Defender مطفّي / برنامج حماية ثاني
+            if (Regex.IsMatch(text, @"0x800106ba|0x80508023|service.*(not|disabled)|Failed with hr", RegexOptions.IgnoreCase) && threats.Count == 0)
+                return -1;
+            return p.ExitCode;
         }
 
         // ------------------------------------------------------------------
@@ -250,26 +489,6 @@ namespace USBGuard
                 File.SetAttributes(v, FileAttributes.Directory | FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReadOnly);
             }
             catch { }
-        }
-
-        static int RunDefender(string root)
-        {
-            try
-            {
-                var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-                var mp = Path.Combine(pf, @"Windows Defender\MpCmdRun.exe");
-                if (!File.Exists(mp)) return -1;
-                var psi = new ProcessStartInfo(mp, $"-Scan -ScanType 3 -File {root}")
-                {
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    WindowStyle = ProcessWindowStyle.Hidden,
-                };
-                using var p = Process.Start(psi);
-                if (!p.WaitForExit(30 * 60 * 1000)) { try { p.Kill(); } catch { } return -1; }
-                return p.ExitCode; // 0 = نظيف, 2 = لگى تهديدات
-            }
-            catch { return -1; }
         }
 
         /// <summary>يعزل بالحجر الصحي، واذا ما گدر يحذف</summary>

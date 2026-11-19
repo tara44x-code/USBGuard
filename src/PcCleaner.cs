@@ -16,6 +16,7 @@ namespace USBGuard
         public int Killed;
         public readonly List<string> Details = new List<string>();
         public bool SalitySuspected;
+        public readonly List<string> DefenderThreats = new List<string>();
         public readonly List<string> Warnings = new List<string>();
     }
 
@@ -52,7 +53,7 @@ namespace USBGuard
             Environment.ExpandEnvironmentVariables(@"%SystemRoot%\Temp"),
         }.Where(d => !string.IsNullOrEmpty(d) && !d.Contains("%")).Select(d => d.TrimEnd('\\') + "\\").ToArray();
 
-        public static PcResult Scan(IProgress<(int pct, string msg)> progress)
+        public static PcResult Scan(bool deep, IProgress<(int pct, string msg)> progress)
         {
             var r = new PcResult();
             void P(int pct, string key) => progress?.Report((pct, L.T(key)));
@@ -64,7 +65,27 @@ namespace USBGuard
             P(55, "pc_step_tasks");  try { CleanScheduledTasks(r); } catch (Exception ex) { Settings.Log("tasks: " + ex.Message); }
             P(70, "pc_step_system"); try { CleanWinlogon(r); CleanIfeo(r); } catch (Exception ex) { Settings.Log("sys: " + ex.Message); }
             P(80, "pc_step_drives"); try { CleanFixedDriveRoots(r); } catch (Exception ex) { Settings.Log("drives: " + ex.Message); }
-            P(90, "pc_step_sality"); try { CheckSality(r); } catch { }
+            P(85, "pc_step_sality"); try { CheckSality(r); } catch { }
+
+            // فحص الذاكرة (RAM) والبرامج الشغالة والتشغيل التلقائي بمحرك Windows Defender
+            if (deep)
+            {
+                P(90, "pc_step_memory");
+                try
+                {
+                    var threats = new List<string>();
+                    var code = Scanner.RunDefender(null, 1, System.Threading.CancellationToken.None, threats);
+                    if (code < 0) r.Warnings.Add(L.T("def_unavailable"));
+                    foreach (var t in threats)
+                    {
+                        r.Threats++;
+                        r.DefenderThreats.Add(t);
+                        r.Details.Add("Defender: " + t);
+                    }
+                    if (threats.Count > 0) Settings.Log("  Defender (الذاكرة): " + string.Join(", ", threats));
+                }
+                catch { }
+            }
             try { var fixes = SystemTools.RepairSystem(); if (fixes > 0) r.Details.Add(L.F("pc_repaired", fixes)); } catch { }
 
             P(100, "step_done");

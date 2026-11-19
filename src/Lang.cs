@@ -169,6 +169,39 @@ namespace USBGuard
             ["pw_warn"]         = new[] { "مهم: إذا نسيت كلمة السر ما تگدر تفتح الإعدادات أو تطفّي البرنامج أو تلغي تثبيته. احفظها بمكان أمين.\n\nتكمل؟", "Important: if you forget the password you can't open settings, exit or uninstall. Keep it somewhere safe.\n\nContinue?" },
             ["pw_set_ok"]       = new[] { "تم تفعيل كلمة السر ✓",                 "Password enabled ✓" },
             ["drop_scan"]       = new[] { "فحص: {0}",                             "Scanning: {0}" },
+            // ---- v1.4 ----
+            ["tab_tools"]       = new[] { "الأدوات",                             "Tools" },
+            ["tools_title"]     = new[] { "الأدوات",                             "Tools" },
+            ["tool_junk"]       = new[] { "🧹  تنظيف الملفات المؤقتة",            "🧹  Clean temporary files" },
+            ["tool_hosts"]      = new[] { "🌐  فحص وتصليح ملف hosts",             "🌐  Check & fix hosts file" },
+            ["tool_portable"]   = new[] { "💾  نسخة محمولة على الفلاشة",          "💾  Portable copy to USB" },
+            ["junk_measuring"]  = new[] { "جاري حساب الملفات المؤقتة...",         "Measuring temporary files..." },
+            ["junk_ask"]        = new[] { "لگينا {0} ملف مؤقت بحجم {1}.\nتحذفهن؟", "Found {0} temporary files ({1}).\nDelete them?" },
+            ["junk_done"]       = new[] { "تم حذف {0} ملف ووفّرنا {1} ✓",         "Deleted {0} files, freed {1} ✓" },
+            ["junk_none"]       = new[] { "ماكو ملفات مؤقتة تستاهل الحذف ✓",       "Nothing worth cleaning ✓" },
+            ["hosts_ok"]        = new[] { "ملف hosts سليم ✓",                     "hosts file is clean ✓" },
+            ["hosts_bad"]       = new[] { "لگينا {0} سطر مشبوه بملف hosts:\n\n{1}\n\nنعطّلهن؟ (تنحفظ نسخة احتياطية)", "Found {0} suspicious line(s) in hosts:\n\n{1}\n\nDisable them? (a backup is saved)" },
+            ["hosts_fixed"]     = new[] { "تم تصليح ملف hosts ({0} سطر) ✓",        "hosts file repaired ({0} line(s)) ✓" },
+            ["pc_hosts"]        = new[] { "تصليح ملف hosts ({0} سطر)",            "Repaired hosts file ({0} line(s))" },
+            ["pc_step_hosts"]   = new[] { "فحص ملف hosts...",                     "Checking hosts file..." },
+            ["portable_nousb"]  = new[] { "وصّل فلاشة أول",                        "Plug in a USB drive first" },
+            ["portable_done"]   = new[] { "تم نسخ البرنامج على الفلاشة:\n{0}\n\nشغّله من هناك على أي حاسبة بدون تثبيت.", "Copied to:\n{0}\n\nRun it from there on any PC without installing." },
+            ["portable_mode"]   = new[] { "نسخة محمولة",                          "Portable" },
+            ["startup_title"]   = new[] { "برامج بدء التشغيل ({0})",               "Startup programs ({0})" },
+            ["startup_empty"]   = new[] { "ماكو برامج تشتغل ويا ويندوز",            "No startup programs" },
+            ["startup_on"]      = new[] { "شغال",                                 "Enabled" },
+            ["startup_off"]     = new[] { "معطّل",                                "Disabled" },
+            ["startup_disable"] = new[] { "تعطيل",                                "Disable" },
+            ["startup_enable"]  = new[] { "تفعيل",                                "Enable" },
+            ["opt_ransom"]      = new[] { "الحماية من الفدية (المستندات والصور)",   "Ransomware protection (Documents, Pictures)" },
+            ["ransom_note"]     = new[] { "تم تفعيل الحماية من الفدية ✓\nإذا برنامج تثق بيه (مثل لعبة) ما گدر يحفظ بالمستندات، ويندوز راح يطلعلك تنبيه وتگدر تسمحله من Windows Security.", "Ransomware protection enabled ✓\nIf a trusted app (like a game) can't save to Documents, Windows will notify you and you can allow it in Windows Security." },
+            ["ransom_fail"]     = new[] { "ما گدرنا نغيّر الحماية من الفدية. تأكد إن Windows Defender شغال.", "Couldn't change ransomware protection. Make sure Windows Defender is active." },
+            ["opt_accent"]      = new[] { "لون البرنامج",                         "Accent color" },
+            ["opt_light"]       = new[] { "الوضع الفاتح",                         "Light mode" },
+            ["theme_restart"]   = new[] { "التغيير يتطبق بعد إعادة تشغيل البرنامج. نعيد التشغيل الحين؟", "Restart USB Guard now to apply the new look?" },
+            ["chart_title"]     = new[] { "التهديدات بآخر 8 أسابيع",              "Threats in the last 8 weeks" },
+            ["toast_open"]      = new[] { "عرض",                                  "Open" },
+            ["toast_update"]    = new[] { "تحديث",                                "Update" },
             ["installed"]       = new[] { "تم تثبيت USB Guard وصار يحمي جهازك ✓", "USB Guard is installed and protecting you ✓" },
         };
 
@@ -179,5 +212,13 @@ namespace USBGuard
         }
 
         public static string F(string key, params object[] args) => string.Format(T(key), args);
+
+        public static string AccentName(int i)
+        {
+            string[] ar = { "أزرق", "أخضر", "أحمر", "بنفسجي", "برتقالي" };
+            string[] en = { "Blue", "Green", "Red", "Purple", "Orange" };
+            i = System.Math.Max(0, System.Math.Min(ar.Length - 1, i));
+            return Ar ? ar[i] : en[i];
+        }
     }
 }

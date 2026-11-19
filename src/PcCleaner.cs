@@ -65,6 +65,13 @@ namespace USBGuard
             P(55, "pc_step_tasks");  try { CleanScheduledTasks(r); } catch (Exception ex) { Settings.Log("tasks: " + ex.Message); }
             P(70, "pc_step_system"); try { CleanWinlogon(r); CleanIfeo(r); } catch (Exception ex) { Settings.Log("sys: " + ex.Message); }
             P(80, "pc_step_drives"); try { CleanFixedDriveRoots(r); } catch (Exception ex) { Settings.Log("drives: " + ex.Message); }
+            P(83, "pc_step_hosts");
+            try
+            {
+                var fixedHosts = HostsCheck.Fix();
+                if (fixedHosts > 0) { r.Threats++; r.Details.Add(L.F("pc_hosts", fixedHosts)); }
+            }
+            catch { }
             P(85, "pc_step_sality"); try { CheckSality(r); } catch { }
 
             // فحص الذاكرة (RAM) والبرامج الشغالة والتشغيل التلقائي بمحرك Windows Defender

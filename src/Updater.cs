@@ -86,7 +86,7 @@ namespace USBGuard
                 if (fs.ReadByte() != 'M' || fs.ReadByte() != 'Z') throw new Exception("Invalid update file");
             }
 
-            var target = SystemTools.InstalledExe;
+            var target = SystemTools.IsRunningInstalled ? SystemTools.InstalledExe : SystemTools.CurrentExe;
             var bat = Path.Combine(Path.GetTempPath(), "usbguard_update.cmd");
             File.WriteAllText(bat,
                 "@echo off\r\n" +

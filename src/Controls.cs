@@ -12,17 +12,56 @@ namespace USBGuard
     // =====================================================================
     public static class Theme
     {
-        public static readonly Color Bg        = Color.FromArgb(10, 15, 28);
-        public static readonly Color Card      = Color.FromArgb(18, 26, 44);
-        public static readonly Color CardHover = Color.FromArgb(24, 35, 60);
-        public static readonly Color Border    = Color.FromArgb(32, 46, 76);
-        public static readonly Color Accent    = Color.FromArgb(47, 128, 255);
-        public static readonly Color Accent2   = Color.FromArgb(0, 194, 255);
-        public static readonly Color Text      = Color.FromArgb(230, 237, 247);
-        public static readonly Color Muted     = Color.FromArgb(138, 151, 176);
+        public static Color Bg        = Color.FromArgb(10, 15, 28);
+        public static Color Bg2       = Color.FromArgb(14, 22, 42);
+        public static Color Card      = Color.FromArgb(18, 26, 44);
+        public static Color CardHover = Color.FromArgb(24, 35, 60);
+        public static Color Border    = Color.FromArgb(32, 46, 76);
+        public static Color Accent    = Color.FromArgb(47, 128, 255);
+        public static Color Accent2   = Color.FromArgb(0, 194, 255);
+        public static Color Text      = Color.FromArgb(230, 237, 247);
+        public static Color Strong    = Color.White;              // نص الهوفر
+        public static Color Muted     = Color.FromArgb(138, 151, 176);
+        public static Color TabBg     = Color.FromArgb(14, 21, 38);
+        public static Color RingIn1   = Color.FromArgb(22, 34, 60);
+        public static Color RingIn2   = Color.FromArgb(12, 18, 34);
+        public static Color Track     = Color.FromArgb(30, 44, 74);
+        public static Color ToggleOff = Color.FromArgb(45, 58, 88);
+        public static Color AboutTop  = Color.FromArgb(24, 38, 70);
+        public static bool Light;
         public static readonly Color Green     = Color.FromArgb(34, 197, 94);
         public static readonly Color Red       = Color.FromArgb(239, 68, 68);
         public static readonly Color Amber     = Color.FromArgb(245, 158, 11);
+
+        // الوان التمييز: ازرق، اخضر، احمر، بنفسجي، برتقالي
+        static readonly Color[][] Accents =
+        {
+            new[] { Color.FromArgb(47, 128, 255), Color.FromArgb(0, 194, 255) },
+            new[] { Color.FromArgb(16, 185, 129), Color.FromArgb(52, 211, 153) },
+            new[] { Color.FromArgb(225, 29, 72),  Color.FromArgb(251, 113, 133) },
+            new[] { Color.FromArgb(124, 58, 237), Color.FromArgb(192, 132, 252) },
+            new[] { Color.FromArgb(234, 88, 12),  Color.FromArgb(251, 191, 36) },
+        };
+        public static int AccentCount => Accents.Length;
+
+        public static void Apply(int accent, bool light)
+        {
+            var a = Accents[Math.Max(0, Math.Min(Accents.Length - 1, accent))];
+            Accent = a[0]; Accent2 = a[1];
+            Light = light;
+            if (!light) return;
+            Bg = Color.FromArgb(244, 247, 252); Bg2 = Color.FromArgb(232, 238, 248);
+            Card = Color.White; CardHover = Color.FromArgb(236, 242, 252);
+            Border = Color.FromArgb(212, 220, 235);
+            Text = Color.FromArgb(22, 30, 46); Strong = Color.Black;
+            Muted = Color.FromArgb(98, 112, 136);
+            TabBg = Color.White;
+            RingIn1 = Color.FromArgb(236, 242, 252); RingIn2 = Color.FromArgb(250, 252, 255);
+            Track = Color.FromArgb(218, 226, 240); ToggleOff = Color.FromArgb(196, 206, 224);
+            AboutTop = Color.FromArgb(226, 236, 254);
+            // في الوضع الفاتح نخلي اللون الثاني اغمق شوية حتى يبين النص
+            Accent2 = ControlPaint.Dark(a[1], 0.15f);
+        }
 
         public static float Scale = 1f;
         public static int S(int v) => (int)Math.Round(v * Scale);
@@ -101,8 +140,8 @@ namespace USBGuard
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             if (_down) r.Inflate(-1, -1);
             using var path = Theme.Round(r, Theme.S(14));
-            Color c1 = Enabled ? Theme.Accent : Color.FromArgb(40, 56, 90);
-            Color c2 = Enabled ? Theme.Accent2 : Color.FromArgb(40, 56, 90);
+            Color c1 = Enabled ? Theme.Accent : Theme.Track;
+            Color c2 = Enabled ? Theme.Accent2 : Theme.Track;
             if (Hover && Enabled) { c1 = ControlPaint.Light(c1, 0.15f); c2 = ControlPaint.Light(c2, 0.15f); }
             using (var br = new LinearGradientBrush(r, c1, c2, LinearGradientMode.Horizontal))
                 g.FillPath(br, path);
@@ -158,7 +197,7 @@ namespace USBGuard
             // المفتاح على اليسار بالعربي، وعلى اليمين بالانكليزي
             float sx = L.Ar ? 2 : Width - sw - 2;
             var sr = new RectangleF(sx, (Height - sh) / 2f, sw, sh);
-            var off = Color.FromArgb(45, 58, 88);
+            var off = Theme.ToggleOff;
             Color track = Blend(off, Theme.Accent, _anim);
             using (var p = Theme.Round(sr, sh / 2f))
             using (var b = new SolidBrush(track)) g.FillPath(b, p);
@@ -169,7 +208,7 @@ namespace USBGuard
 
             var tr = L.Ar ? new RectangleF(sw + Theme.S(10), 0, Width - sw - Theme.S(10), Height)
                           : new RectangleF(0, 0, Width - sw - Theme.S(10), Height);
-            Theme.DrawText(g, Text, Font, Hover ? Color.White : Theme.Text, tr, StringAlignment.Near);
+            Theme.DrawText(g, Text, Font, Hover ? Theme.Strong : Theme.Text, tr, StringAlignment.Near);
         }
 
         static Color Blend(Color a, Color b, float t) =>
@@ -230,12 +269,12 @@ namespace USBGuard
 
             // دائرة داخلية
             var inner = RectangleF.Inflate(r, -Theme.S(14), -Theme.S(14));
-            using (var ib = new LinearGradientBrush(inner, Color.FromArgb(22, 34, 60), Color.FromArgb(12, 18, 34), 90f))
+            using (var ib = new LinearGradientBrush(inner, Theme.RingIn1, Theme.RingIn2, 90f))
                 g.FillEllipse(ib, inner);
 
             // المسار
             var ring = RectangleF.Inflate(r, -Theme.S(6), -Theme.S(6));
-            using (var track = new Pen(Color.FromArgb(30, 44, 74), Theme.S(5)))
+            using (var track = new Pen(Theme.Track, Theme.S(5)))
                 g.DrawEllipse(track, ring);
 
             using (var pen = new Pen(c, Theme.S(5)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
@@ -268,7 +307,7 @@ namespace USBGuard
                 {
                     var txt = _center ?? (_indeterminate ? "" : _progress + "%");
                     using var f = Theme.Font(txt.Length > 4 ? 15f : 20f, FontStyle.Bold);
-                    Theme.DrawText(g, txt, f, Color.White, inner);
+                    Theme.DrawText(g, txt, f, Theme.Text, inner);
                 }
                 else
                 {
@@ -408,7 +447,7 @@ namespace USBGuard
                 using var b = new SolidBrush(Type == Kind.Close ? Theme.Red : Theme.CardHover);
                 g.FillPath(b, p);
             }
-            using var pen = new Pen(Hover ? Color.White : Theme.Muted, Theme.S(1.6f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            using var pen = new Pen(Hover ? (Type == Kind.Close ? Color.White : Theme.Strong) : Theme.Muted, Theme.S(1.6f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
             float cx = Width / 2f, cy = Height / 2f, s = Theme.S(5);
             switch (Type)
             {
@@ -420,7 +459,7 @@ namespace USBGuard
                     g.DrawLine(pen, cx - s, cy, cx + s, cy);
                     break;
                 case Kind.Lang:
-                    using (var b = new SolidBrush(Hover ? Color.White : Theme.Muted))
+                    using (var b = new SolidBrush(Hover ? Theme.Strong : Theme.Muted))
                     using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
                         g.DrawString(Text, Font, b, r, sf);
                     break;
@@ -443,6 +482,8 @@ namespace USBGuard
         int _selected, _hover = -1;
         public event Action<int> SelectedChanged;
         public int Badge; // عدد على تبويب الحجر
+        public int BadgeIndex = 2;
+        public int[] IconMap; // اي ايقونة لكل تبويب
 
         public int Selected
         {
@@ -473,7 +514,7 @@ namespace USBGuard
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics; Theme.HQ(g);
-            using (var b = new SolidBrush(Color.FromArgb(14, 21, 38))) g.FillRectangle(b, ClientRectangle);
+            using (var b = new SolidBrush(Theme.TabBg)) g.FillRectangle(b, ClientRectangle);
             using (var p = new Pen(Theme.Border)) g.DrawLine(p, 0, 0, Width, 0);
 
             float w = Width / (float)Count;
@@ -482,7 +523,7 @@ namespace USBGuard
                 int i = VisualToIndex(v);
                 var cell = new RectangleF(v * w, 0, w, Height);
                 bool sel = i == _selected;
-                var c = sel ? Theme.Accent2 : (i == _hover ? Theme.Text : Theme.Muted);
+                var c = sel ? Theme.Accent2 : (i == _hover ? Theme.Strong : Theme.Muted);
 
                 if (sel)
                 {
@@ -491,11 +532,11 @@ namespace USBGuard
                     using var pb = new SolidBrush(Color.FromArgb(40, Theme.Accent));
                     g.FillPath(pb, pp);
                 }
-                DrawIcon(g, i, new PointF(cell.X + w / 2, Theme.S(19)), Theme.S(8.5f), c);
+                DrawIcon(g, IconMap != null && i < IconMap.Length ? IconMap[i] : i, new PointF(cell.X + w / 2, Theme.S(19)), Theme.S(8.5f), c);
                 using (var f = Theme.Font(7.5f, sel ? FontStyle.Bold : FontStyle.Regular))
                     Theme.DrawText(g, Labels[i] ?? "", f, c, new RectangleF(cell.X, Theme.S(34), w, Height - Theme.S(36)), StringAlignment.Center, StringAlignment.Near);
 
-                if (i == 2 && Badge > 0)
+                if (i == BadgeIndex && Badge > 0)
                 {
                     var br = new RectangleF(cell.X + w / 2 + Theme.S(6), Theme.S(4), Theme.S(16), Theme.S(16));
                     using (var bb = new SolidBrush(Theme.Red)) g.FillEllipse(bb, br);
@@ -532,6 +573,10 @@ namespace USBGuard
                     g.DrawEllipse(pen, x - s, y - s, s * 2, s * 2);
                     g.DrawLine(pen, x, y, x, y - s * 0.55f);
                     g.DrawLine(pen, x, y, x + s * 0.45f, y + s * 0.25f);
+                    break;
+                case 5: // مفتاح ربط (الادوات)
+                    g.DrawLine(pen, x - s * 0.7f, y + s * 0.7f, x + s * 0.15f, y - s * 0.15f);
+                    g.DrawArc(pen, x - s * 0.05f, y - s * 0.95f, s * 0.95f, s * 0.95f, 100, 250);
                     break;
                 case 4: // ترس
                     g.DrawEllipse(pen, x - s * 0.62f, y - s * 0.62f, s * 1.24f, s * 1.24f);
@@ -696,7 +741,7 @@ namespace USBGuard
                     }
                     using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                     if (L.Ar) sf.FormatFlags |= StringFormatFlags.DirectionRightToLeft;
-                    using var tb = new SolidBrush(hv ? Color.White : a.Color);
+                    using var tb = new SolidBrush(hv ? Theme.Strong : a.Color);
                     g.DrawString(a.Text, fBtn, tb, br, sf);
                 }
 
@@ -739,7 +784,7 @@ namespace USBGuard
             using var p = Theme.Round(r, Theme.S(12));
             using (var b = new SolidBrush(Color.FromArgb(Hover ? 45 : 18, Color))) g.FillPath(b, p);
             using (var pen = new Pen(Color.FromArgb(Hover ? 230 : 140, Color), 1.3f)) g.DrawPath(pen, p);
-            Theme.DrawText(g, Text, Font, Hover ? Color.White : Color, r);
+            Theme.DrawText(g, Text, Font, Hover ? Theme.Strong : Color, r);
         }
     }
 
@@ -779,7 +824,7 @@ namespace USBGuard
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             using (var p = Theme.Round(r, Theme.S(16)))
             {
-                using (var b = new LinearGradientBrush(r, Color.FromArgb(24, 38, 70), Theme.Card, 90f)) g.FillPath(b, p);
+                using (var b = new LinearGradientBrush(r, Theme.AboutTop, Theme.Card, 90f)) g.FillPath(b, p);
                 using var pen = new Pen(Theme.Border); g.DrawPath(pen, p);
             }
             float ls = Theme.S(52);
@@ -1012,7 +1057,7 @@ namespace USBGuard
             Theme.DrawText(g, (Value ?? "") + "  ▾", fb, Theme.Accent2, pr);
             var tr = L.Ar ? new RectangleF(pw + Theme.S(10), 0, Width - pw - Theme.S(10), Height)
                           : new RectangleF(0, 0, Width - pw - Theme.S(10), Height);
-            Theme.DrawText(g, Text, Font, Hover ? Color.White : Theme.Text, tr, StringAlignment.Near);
+            Theme.DrawText(g, Text, Font, Hover ? Theme.Strong : Theme.Text, tr, StringAlignment.Near);
         }
     }
 
@@ -1076,6 +1121,251 @@ namespace USBGuard
         {
             using var d = new PasswordDialog(prompt, error);
             return d.ShowDialog(owner) == DialogResult.OK ? d._box.Text : null;
+        }
+    }
+}
+
+namespace USBGuard
+{
+    using System.Collections.Generic;
+    using System.Linq;
+
+    // =====================================================================
+    //  اشعارات حديثة بشكل البرنامج (بدل فقاعات ويندوز القديمة)
+    // =====================================================================
+    public class Toast : Form
+    {
+        static readonly List<Toast> Open = new List<Toast>();
+        readonly string _title, _text, _button;
+        readonly Action _onClick;
+        readonly Color _accent;
+        readonly Image _logo;
+        readonly Timer _life = new Timer { Interval = 6500 };
+        readonly Timer _fade = new Timer { Interval = 15 };
+        bool _closing, _hover;
+        RectangleF _btnRect, _closeRect;
+
+        Toast(string title, string text, ToolTipIcon icon, Image logo, string button, Action onClick)
+        {
+            _title = title; _text = text; _button = button; _onClick = onClick; _logo = logo;
+            _accent = icon == ToolTipIcon.Warning ? Theme.Amber : icon == ToolTipIcon.Error ? Theme.Red : Theme.Accent;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            TopMost = true;
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Theme.Card;
+            DoubleBuffered = true;
+            Opacity = 0;
+            int h = string.IsNullOrEmpty(button) ? 92 : 120;
+            ClientSize = new Size(Theme.S(340), Theme.S(h));
+            Cursor = Cursors.Hand;
+            _life.Tick += (s, e) => { if (!_hover) BeginClose(); };
+            _fade.Tick += (s, e) =>
+            {
+                if (_closing) { Opacity -= 0.08; if (Opacity <= 0.02) { _fade.Stop(); Close(); } }
+                else { Opacity = Math.Min(1, Opacity + 0.12); Top = Math.Max(_targetTop, Top - Theme.S(4)); if (Opacity >= 1 && Top == _targetTop) _fade.Stop(); }
+            };
+        }
+
+        int _targetTop;
+        protected override bool ShowWithoutActivation => true;
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.ExStyle |= 0x08000000 /*NOACTIVATE*/ | 0x80 /*TOOLWINDOW*/ | 0x8 /*TOPMOST*/;
+                cp.ClassStyle |= 0x20000; // ظل
+                return cp;
+            }
+        }
+
+        public static void Show(string text, ToolTipIcon icon, Image logo, string button = null, Action onClick = null, string title = "USB Guard")
+        {
+            try
+            {
+                var t = new Toast(title, text, icon, logo, button, onClick);
+                var wa = Screen.PrimaryScreen.WorkingArea;
+                int gap = Theme.S(10);
+                int bottom = wa.Bottom - gap - Open.Where(o => !o.IsDisposed).Sum(o => o.Height + gap);
+                t._targetTop = bottom - t.Height;
+                t.Location = new Point(wa.Right - t.Width - gap, t._targetTop + Theme.S(24));
+                Open.Add(t);
+                if (Open.Count > 4) Open[0].BeginClose();
+                t.FormClosed += (s, e) => { Open.Remove(t); Reflow(); };
+                t.Show();
+                t._fade.Start();
+                t._life.Start();
+            }
+            catch { }
+        }
+
+        static void Reflow()
+        {
+            var wa = Screen.PrimaryScreen.WorkingArea;
+            int gap = Theme.S(10), bottom = wa.Bottom - gap;
+            foreach (var o in Open.Where(x => !x.IsDisposed))
+            {
+                o._targetTop = bottom - o.Height;
+                o.Top = o._targetTop;
+                bottom -= o.Height + gap;
+            }
+        }
+
+        void BeginClose() { if (_closing) return; _closing = true; _life.Stop(); _fade.Start(); }
+
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; base.OnMouseLeave(e); }
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);
+            if (_closeRect.Contains(e.Location)) { BeginClose(); return; }
+            BeginClose();
+            try { _onClick?.Invoke(); } catch { }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics; Theme.HQ(g);
+            var r = new RectangleF(0, 0, Width - 1, Height - 1);
+            using (var b = new LinearGradientBrush(r, Theme.Card, Theme.Bg2, 90f)) g.FillRectangle(b, r);
+            using (var p = new Pen(Theme.Border)) g.DrawRectangle(p, 0, 0, Width - 1, Height - 1);
+            using (var ab = new SolidBrush(_accent)) g.FillRectangle(ab, L.Ar ? Width - Theme.S(4) : 0, 0, Theme.S(4), Height);
+
+            float pad = Theme.S(14), ls = Theme.S(40);
+            float lx = L.Ar ? Width - pad - ls - Theme.S(4) : pad + Theme.S(4);
+            if (_logo != null)
+            {
+                var lr = new RectangleF(lx, pad, ls, ls);
+                using var clip = Theme.Round(lr, Theme.S(10));
+                var old = g.Clip; g.SetClip(clip, CombineMode.Intersect); g.DrawImage(_logo, lr); g.Clip = old;
+            }
+            float tx = L.Ar ? pad + Theme.S(20) : lx + ls + Theme.S(12);
+            float tw = Width - ls - pad * 2 - Theme.S(36);
+            using (var f1 = Theme.Font(10f, FontStyle.Bold))
+                Theme.DrawText(g, _title, f1, Theme.Text, new RectangleF(tx, pad - Theme.S(2), tw, Theme.S(20)), StringAlignment.Near);
+            using (var f2 = Theme.Font(8.5f))
+                Theme.DrawText(g, _text, f2, Theme.Muted, new RectangleF(tx, pad + Theme.S(19), tw, Theme.S(44)), StringAlignment.Near, StringAlignment.Near);
+
+            // زر الاغلاق
+            float cs = Theme.S(18);
+            _closeRect = new RectangleF(L.Ar ? Theme.S(8) : Width - cs - Theme.S(8), Theme.S(8), cs, cs);
+            using (var cp = new Pen(Theme.Muted, Theme.S(1.4f)))
+            {
+                float c = Theme.S(4.5f);
+                var cc = new PointF(_closeRect.X + cs / 2, _closeRect.Y + cs / 2);
+                g.DrawLine(cp, cc.X - c, cc.Y - c, cc.X + c, cc.Y + c);
+                g.DrawLine(cp, cc.X + c, cc.Y - c, cc.X - c, cc.Y + c);
+            }
+
+            if (!string.IsNullOrEmpty(_button))
+            {
+                using var fb = Theme.Font(8.5f, FontStyle.Bold);
+                float bw = TextRenderer.MeasureText(_button, fb).Width + Theme.S(24);
+                _btnRect = L.Ar ? new RectangleF(pad, Height - Theme.S(38), bw, Theme.S(26)) : new RectangleF(Width - bw - pad, Height - Theme.S(38), bw, Theme.S(26));
+                using (var bp = Theme.Round(_btnRect, Theme.S(8)))
+                using (var bb = new LinearGradientBrush(_btnRect, Theme.Accent, Theme.Accent2, 0f)) g.FillPath(bb, bp);
+                Theme.DrawText(g, _button, fb, Color.White, _btnRect);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { _life.Dispose(); _fade.Dispose(); }
+            base.Dispose(disposing);
+        }
+    }
+
+    // =====================================================================
+    //  رسم بياني: التهديدات بآخر 8 أسابيع
+    // =====================================================================
+    public class WeeklyChart : PaintedControl
+    {
+        public int[] Values = new int[8];
+        public string[] Labels = new string[8];
+        public string Title = "";
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics; Theme.HQ(g);
+            var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+            using (var p = Theme.Round(r, Theme.S(12)))
+            {
+                using (var b = new SolidBrush(Theme.Card)) g.FillPath(b, p);
+                using var pen = new Pen(Theme.Border); g.DrawPath(pen, p);
+            }
+            using (var ft = Theme.Font(8f, FontStyle.Bold))
+                Theme.DrawText(g, Title, ft, Theme.Muted, new RectangleF(Theme.S(12), Theme.S(4), Width - Theme.S(24), Theme.S(18)), StringAlignment.Near);
+
+            int n = Values.Length;
+            int max = Math.Max(1, Values.Max());
+            float top = Theme.S(26), bottom = Height - Theme.S(18);
+            float area = Width - Theme.S(24);
+            float bw = area / n;
+            using var fl = Theme.Font(6.5f);
+            using var fv = Theme.Font(7f, FontStyle.Bold);
+            for (int i = 0; i < n; i++)
+            {
+                int vi = L.Ar ? n - 1 - i : i; // الاحدث على اليسار بالعربي
+                float x = Theme.S(12) + i * bw;
+                float h = (bottom - top - Theme.S(10)) * Values[vi] / max;
+                var bar = new RectangleF(x + bw * 0.22f, bottom - Math.Max(h, Theme.S(2)), bw * 0.56f, Math.Max(h, Theme.S(2)));
+                using (var bp = Theme.Round(bar, Theme.S(3)))
+                using (var bb = new LinearGradientBrush(new RectangleF(bar.X, top, bar.Width, bottom - top + 1),
+                       Values[vi] > 0 ? Theme.Amber : Theme.Track, Values[vi] > 0 ? Theme.Accent : Theme.Track, 90f))
+                    g.FillPath(bb, bp);
+                if (Values[vi] > 0)
+                    Theme.DrawText(g, Values[vi].ToString(), fv, Theme.Text, new RectangleF(x, bar.Y - Theme.S(13), bw, Theme.S(12)));
+                Theme.DrawText(g, Labels[vi] ?? "", fl, Theme.Muted, new RectangleF(x, bottom + Theme.S(2), bw, Theme.S(14)));
+            }
+        }
+    }
+
+    // =====================================================================
+    //  الشخصية المتحركة (الروبوت والزومبي) بخلفية شفافة
+    // =====================================================================
+    public class MascotView : PaintedControl
+    {
+        readonly List<Image> _frames = new List<Image>();
+        int _i;
+        readonly Timer _t = new Timer { Interval = 100 };
+
+        public MascotView()
+        {
+            try
+            {
+                using var s = typeof(MascotView).Assembly.GetManifestResourceStream("USBGuard.mascot.png");
+                if (s != null)
+                {
+                    using var strip = new Bitmap(s);
+                    int fw = 300, count = strip.Width / fw;
+                    for (int k = 0; k < count; k++)
+                        _frames.Add(strip.Clone(new Rectangle(k * fw, 0, fw, strip.Height), System.Drawing.Imaging.PixelFormat.Format32bppPArgb));
+                }
+            }
+            catch { }
+            _t.Tick += (s, e) => { if (_frames.Count > 0) { _i = (_i + 1) % _frames.Count; Invalidate(); } };
+        }
+
+        public bool Animate { get => _t.Enabled; set => _t.Enabled = value && _frames.Count > 0; }
+        public float AspectRatio => _frames.Count > 0 ? _frames[0].Height / (float)_frames[0].Width : 0.6f;
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            if (_frames.Count == 0) return;
+            var g = e.Graphics;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            var f = _frames[_i];
+            float scale = Math.Min(Width / (float)f.Width, Height / (float)f.Height);
+            float w = f.Width * scale, h = f.Height * scale;
+            g.DrawImage(f, (Width - w) / 2, (Height - h) / 2, w, h);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { _t.Dispose(); foreach (var f in _frames) f.Dispose(); }
+            base.Dispose(disposing);
         }
     }
 }

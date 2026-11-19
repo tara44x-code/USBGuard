@@ -26,6 +26,10 @@ namespace USBGuard
         public static string LastScheduledRun { get => GetStr("LastScheduledRun", ""); set => SetStr("LastScheduledRun", value); }
         public static string PasswordHash { get => GetStr("PwHash", "");     set => SetStr("PwHash", value); }
         public static string PasswordSalt { get => GetStr("PwSalt", "");     set => SetStr("PwSalt", value); }
+        // v1.4
+        public static int  Accent      { get => GetInt("Accent", 0);          set => SetInt("Accent", value); }
+        public static bool LightMode   { get => GetBool("LightMode", false);  set => SetBool("LightMode", value); }
+        public static bool Ransomware  { get => GetBool("Ransomware", false); set => SetBool("Ransomware", value); }
         public static int  TotalThreats{ get => GetInt("TotalThreats", 0);    set => SetInt("TotalThreats", value); }
         public static int  TotalRestored{get => GetInt("TotalRestored", 0);   set => SetInt("TotalRestored", value); }
         public static string LastScan  { get => GetStr("LastScan", "");       set => SetStr("LastScan", value); }

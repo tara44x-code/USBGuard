@@ -35,7 +35,7 @@ namespace USBGuard
         readonly TitleButton _btnMin = new TitleButton { Type = TitleButton.Kind.Minimize };
         readonly TitleButton _btnLang = new TitleButton { Type = TitleButton.Kind.Lang };
         readonly TabBar _tabs = new TabBar();
-        readonly Panel[] _pages = new Panel[5];
+        readonly Panel[] _pages = new Panel[6];
         readonly System.Windows.Forms.Timer _repairTimer = new System.Windows.Forms.Timer { Interval = 60000 };
 
         // ---------------- page 0: USB ----------------
@@ -83,6 +83,16 @@ namespace USBGuard
         readonly System.Windows.Forms.Timer _scheduleTimer = new System.Windows.Forms.Timer { Interval = 30000 };
         readonly List<(string text, ToolTipIcon icon)> _heldNotices = new List<(string, ToolTipIcon)>();
         int _lastPage;
+
+        // ---------------- v1.4 ----------------
+        readonly TextBlock _tTitle = new TextBlock(), _toolsMsg = new TextBlock(), _startupTitle = new TextBlock();
+        readonly OutlineButton _btnJunk = new OutlineButton(), _btnHosts = new OutlineButton(), _btnPortable = new OutlineButton();
+        readonly CardList _startupList = new CardList();
+        readonly ToggleRow _tRansom = new ToggleRow(), _tLight = new ToggleRow();
+        readonly ChoiceRow _cAccent = new ChoiceRow();
+        readonly WeeklyChart _chart = new WeeklyChart();
+        readonly MascotView _mascot = new MascotView();
+        bool _toolBusy;
         readonly AboutCard _about = new AboutCard();
         readonly LinkText _dev = new LinkText(), _lnkUninstall = new LinkText();
         readonly OutlineButton _btnUpdate = new OutlineButton(), _btnRepo = new OutlineButton();
@@ -124,6 +134,7 @@ namespace USBGuard
             BuildChrome();
             BuildUsbPage();
             BuildPcPage();
+            BuildToolsPage();
             BuildQuarantinePage();
             BuildHistoryPage();
             BuildSettingsPage();
@@ -179,6 +190,9 @@ namespace USBGuard
             }
 
             _tabs.Bounds = R(0, TitleH + PageH, W, TabH);
+            _tabs.Labels = new string[6];
+            _tabs.IconMap = new[] { 0, 1, 5, 2, 3, 4 };
+            _tabs.BadgeIndex = 3;
             _tabs.SelectedChanged += ShowPage;
 
             Controls.AddRange(new Control[] { _btnClose, _btnMin, _btnLang, _tabs });
@@ -187,7 +201,7 @@ namespace USBGuard
 
         void ShowPage(int i)
         {
-            if (i == 4 && _lastPage != 4 && !Security.Require(this))
+            if (i == 5 && _lastPage != 5 && !Security.Require(this))
             {
                 _tabs.Selected = _lastPage;
                 return;
@@ -197,8 +211,10 @@ namespace USBGuard
             if (_tabs.Selected != i) _tabs.Selected = i;
             _ring.Animate = Visible && i == 0;
             _pcRing.Animate = Visible && i == 1;
-            if (i == 2) RefreshQuarantine();
-            if (i == 3) RefreshHistory();
+            if (i == 2) RefreshTools();
+            if (i == 3) RefreshQuarantine();
+            if (i == 4) RefreshHistory();
+            _mascot.Animate = Visible && i == 5;
         }
 
         // ==================================================================
@@ -337,11 +353,144 @@ namespace USBGuard
         }
 
         // ==================================================================
+        //  صفحة 2: الادوات
+        // ==================================================================
+        void BuildToolsPage()
+        {
+            var p = _pages[2];
+            _tTitle.Bounds = R(20, 10, W - 40, 28);
+            _tTitle.Font = Theme.Font(14f, FontStyle.Bold);
+            _tTitle.Align = StringAlignment.Near;
+
+            _btnJunk.Bounds = R(20, 46, W - 40, 40);
+            _btnHosts.Bounds = R(20, 92, W - 40, 40);
+            _btnPortable.Bounds = R(20, 138, W - 40, 40);
+            foreach (var b in new[] { _btnJunk, _btnHosts, _btnPortable }) b.Font = Theme.Font(9.5f, FontStyle.Bold);
+            _btnJunk.Click += async (s, e) => await RunJunkCleaner();
+            _btnHosts.Click += (s, e) => RunHostsCheck();
+            _btnPortable.Click += (s, e) => MakePortable();
+
+            _toolsMsg.Bounds = R(16, 182, W - 32, 34);
+            _toolsMsg.Font = Theme.Font(8.5f);
+            _toolsMsg.Color = Theme.Muted;
+
+            _startupTitle.Bounds = R(20, 220, W - 40, 22);
+            _startupTitle.Font = Theme.Font(9.5f, FontStyle.Bold);
+            _startupTitle.Color = Theme.Accent2;
+            _startupTitle.Align = StringAlignment.Near;
+            _startupList.Bounds = R(20, 246, W - 32, PageH - 254);
+
+            p.Controls.AddRange(new Control[] { _tTitle, _btnJunk, _btnHosts, _btnPortable, _toolsMsg, _startupTitle, _startupList });
+        }
+
+        void ToolsMsg(string t) { _toolsMsg.Text = t; _toolsMsg.Invalidate(); }
+
+        void RefreshTools()
+        {
+            List<StartupEntry> list;
+            try { list = StartupManager.List(); } catch { list = new List<StartupEntry>(); }
+            _startupTitle.Text = L.F("startup_title", list.Count);
+            _startupList.SetItems(list.Select(en => new CardItem
+            {
+                Title = en.Name,
+                Subtitle = en.Command,
+                Meta = (en.Enabled ? L.T("startup_on") : L.T("startup_off")) + " • " + en.Location,
+                Accent = en.Enabled ? Theme.Green : Theme.Muted,
+                Actions = new List<CardAction>
+                {
+                    new CardAction
+                    {
+                        Text = en.Enabled ? L.T("startup_disable") : L.T("startup_enable"),
+                        Color = en.Enabled ? Theme.Amber : Theme.Green,
+                        Click = () => { StartupManager.SetEnabled(en, !en.Enabled); RefreshTools(); },
+                    },
+                },
+            }));
+            _startupTitle.Invalidate();
+        }
+
+        async Task RunJunkCleaner()
+        {
+            if (_toolBusy) return;
+            _toolBusy = true;
+            try
+            {
+                ToolsMsg(L.T("junk_measuring"));
+                var (bytes, files) = await Task.Run(() => JunkCleaner.Measure());
+                if (files == 0 || bytes < 1024 * 1024) { ToolsMsg(L.T("junk_none")); return; }
+                if (Msg(L.F("junk_ask", files.ToString("N0"), FormatSize(bytes)), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                { ToolsMsg(""); return; }
+                var (freed, deleted) = await Task.Run(() => JunkCleaner.Clean());
+                ToolsMsg(L.F("junk_done", deleted.ToString("N0"), FormatSize(freed)));
+            }
+            finally { _toolBusy = false; }
+        }
+
+        void RunHostsCheck()
+        {
+            var bad = HostsCheck.Find();
+            if (bad.Count == 0) { ToolsMsg(L.T("hosts_ok")); return; }
+            var preview = string.Join("\n", bad.Take(8).Select(b => b.text));
+            if (Msg(L.F("hosts_bad", bad.Count, preview), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            var n = HostsCheck.Fix();
+            ToolsMsg(L.F("hosts_fixed", n));
+            if (n > 0) History.Add(new ScanRecord { Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm"), Target = "PC", Threats = n, Items = bad.Select(b => "hosts: " + b.text).ToList() });
+        }
+
+        void MakePortable()
+        {
+            var usb = _driveList.Items.FirstOrDefault(d => d.Kind == 0 && d.Root == _driveList.SelectedRoot)?.Root
+                      ?? _driveList.Items.FirstOrDefault(d => d.Kind == 0)?.Root;
+            if (usb == null) { Msg(L.T("portable_nousb"), MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            try
+            {
+                var dest = Portable.Copy(usb);
+                Msg(L.F("portable_done", dest), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { Msg(ex.Message, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        }
+
+        void AskRestartForTheme()
+        {
+            if (Msg(L.T("theme_restart"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            try
+            {
+                var exe = SystemTools.CurrentExe;
+                Process.Start(new ProcessStartInfo("cmd.exe", $"/c ping 127.0.0.1 -n 3 >nul & start \"\" \"{exe}\"")
+                { CreateNoWindow = true, UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden });
+            }
+            catch { }
+            ExitApp();
+        }
+
+        void UpdateChart(List<ScanRecord> items)
+        {
+            var start = DateTime.Today.AddDays(-(int)DateTime.Today.DayOfWeek); // بداية هذا الاسبوع (الاحد)
+            var vals = new int[8];
+            var labels = new string[8];
+            for (int k = 0; k < 8; k++)
+            {
+                var ws = start.AddDays(-7 * (7 - k));
+                labels[k] = ws.ToString("d/M");
+            }
+            foreach (var h in items)
+            {
+                if (!DateTime.TryParse(h.Date, out var d)) continue;
+                int weeksAgo = d.Date >= start ? 0 : (int)Math.Ceiling((start - d.Date).TotalDays / 7.0);
+                int i = 7 - weeksAgo;
+                if (i >= 0 && i < 8) vals[i] += h.Threats;
+            }
+            _chart.Values = vals;
+            _chart.Labels = labels;
+            _chart.Invalidate();
+        }
+
+        // ==================================================================
         //  صفحة 2: الحجر الصحي
         // ==================================================================
         void BuildQuarantinePage()
         {
-            var p = _pages[2];
+            var p = _pages[3];
             _qTitle.Bounds = R(20, 14, W - 140, 28);
             _qTitle.Font = Theme.Font(14f, FontStyle.Bold);
             _qTitle.Align = StringAlignment.Near;
@@ -397,7 +546,7 @@ namespace USBGuard
         // ==================================================================
         void BuildHistoryPage()
         {
-            var p = _pages[3];
+            var p = _pages[4];
             _hTitle.Bounds = R(20, 14, W - 160, 28);
             _hTitle.Font = Theme.Font(14f, FontStyle.Bold);
             _hTitle.Align = StringAlignment.Near;
@@ -410,13 +559,16 @@ namespace USBGuard
             _hSub.Font = Theme.Font(8.5f);
             _hSub.Color = Theme.Muted;
             _hSub.Align = StringAlignment.Near;
-            _hList.Bounds = R(20, 70, W - 32, PageH - 78);
+            _chart.Bounds = R(20, 66, W - 40, 96);
+            _hList.Bounds = R(20, 170, W - 32, PageH - 178);
+            p.Controls.Add(_chart);
             p.Controls.AddRange(new Control[] { _hTitle, _hClear, _hLog, _hSub, _hList });
         }
 
         void RefreshHistory()
         {
             var items = History.Items();
+            UpdateChart(items);
             _hSub.Text = L.F("q_count", items.Count) + " • " + L.F("totals", Settings.TotalThreats, Settings.TotalRestored);
             _hList.EmptyText = L.T("h_empty");
             _hList.SetItems(items.Select(h => new CardItem
@@ -438,7 +590,7 @@ namespace USBGuard
         // ==================================================================
         void BuildSettingsPage()
         {
-            var p = _pages[4];
+            var p = _pages[5];
             _sTitle.Bounds = R(20, 10, W - 40, 28);
             _sTitle.Font = Theme.Font(14f, FontStyle.Bold);
             _sTitle.Align = StringAlignment.Near;
@@ -457,11 +609,11 @@ namespace USBGuard
             void Row(Control t) { t.Bounds = R(24, y, W - 48, 32); c.Controls.Add(t); y += 33; }
 
             Header(_hdrProtect);
-            Row(_tRealtime); Row(_tSelf); Row(_tGame); Row(_tUsbRo);
+            Row(_tRealtime); Row(_tRansom); Row(_tSelf); Row(_tGame); Row(_tUsbRo);
             y += 8; Header(_hdrScan);
             Row(_tAuto); Row(_tDeep); Row(_tPc); Row(_cSchedule); Row(_cHour);
             y += 8; Header(_hdrGeneral);
-            Row(_tStartup); Row(_tUpdate); Row(_tPassword);
+            Row(_tStartup); Row(_tUpdate); Row(_tPassword); Row(_cAccent); Row(_tLight);
             y += 8; Header(_hdrAbout);
 
             _tStartup.SetSilently(Settings.Startup);
@@ -474,6 +626,24 @@ namespace USBGuard
             _tGame.SetSilently(Settings.GameMode);
             _tUsbRo.SetSilently(Settings.UsbReadOnly);
             _tPassword.SetSilently(Security.IsSet);
+            _tRansom.SetSilently(Settings.Ransomware);
+            _tLight.SetSilently(Settings.LightMode);
+            _tRansom.CheckedChanged += async (s, e) =>
+            {
+                var want = _tRansom.Checked;
+                var ok = await Task.Run(() => Ransomware.Set(want));
+                if (!ok) { _tRansom.SetSilently(!want); Msg(L.T("ransom_fail"), MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+                Settings.Ransomware = want;
+                if (want) Msg(L.T("ransom_note"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            };
+            _cAccent.Next += (s, e) =>
+            {
+                Settings.Accent = (Settings.Accent + 1) % Theme.AccentCount;
+                _cAccent.Value = L.AccentName(Settings.Accent); _cAccent.Invalidate();
+                AskRestartForTheme();
+            };
+            _tLight.CheckedChanged += (s, e) => { Settings.LightMode = _tLight.Checked; AskRestartForTheme(); };
+            if (SystemTools.IsPortable) { _tStartup.Visible = false; _tSelf.Visible = false; }
 
             _tStartup.CheckedChanged += (s, e) => { var v = _tStartup.Checked; Settings.Startup = v; Task.Run(() => SystemTools.SetStartup(v)); };
             _tAuto.CheckedChanged += (s, e) => Settings.AutoScan = _tAuto.Checked;
@@ -515,15 +685,18 @@ namespace USBGuard
             };
 
             _about.Logo = _logo;
-            _about.Bounds = R(20, y, W - 40, 168);
+            int mascotH = (int)Math.Round((W - 60) * _mascot.AspectRatio);
+            _about.Bounds = R(20, y, W - 40, 146 + mascotH);
+            _mascot.Bounds = R(10, 140, W - 60, mascotH);
+            _about.Controls.Add(_mascot);
             _dev.Bounds = R(10, 114, W - 60, 24); // داخل بطاقة "حول"
             _dev.Font = Theme.Font(9.5f, FontStyle.Bold);
             _dev.Normal = Theme.Accent2;
-            _dev.HoverColor = Color.White;
+            _dev.HoverColor = Theme.Strong;
             _dev.Click += (s, e) => SystemTools.OpenUrl(SystemTools.DeveloperUrl);
             _dev.BackColor = Color.Transparent;
             _about.Controls.Add(_dev);
-            y += 180;
+            y += 158 + mascotH;
 
             int bw = (W - 40 - 10) / 2;
             _btnUpdate.Bounds = R(20, y, bw, 42);
@@ -698,7 +871,7 @@ namespace USBGuard
         {
             L.Ar = Settings.Arabic;
             _btnLang.Text = L.Ar ? "EN" : "ع";
-            _tabs.Labels = new[] { L.T("tab_home"), L.T("tab_pc"), L.T("tab_quar"), L.T("tab_hist"), L.T("tab_settings") };
+            _tabs.Labels = new[] { L.T("tab_home"), L.T("tab_pc"), L.T("tab_tools"), L.T("tab_quar"), L.T("tab_hist"), L.T("tab_settings") };
 
             _driveList.EmptyText = L.T("drives_empty");
             _pathBtn.Text = L.T("path_btn");
@@ -728,6 +901,16 @@ namespace USBGuard
             _hdrGeneral.Text = L.T("sec_general");
             _hdrAbout.Text = L.T("sec_about");
             _tRealtime.Text = L.T("opt_realtime");
+            _tRansom.Text = L.T("opt_ransom");
+            _tLight.Text = L.T("opt_light");
+            _cAccent.Text = L.T("opt_accent");
+            _cAccent.Value = L.AccentName(Settings.Accent);
+            _tTitle.Text = L.T("tools_title");
+            _btnJunk.Text = L.T("tool_junk");
+            _btnHosts.Text = L.T("tool_hosts");
+            _btnPortable.Text = L.T("tool_portable");
+            _startupList.EmptyText = L.T("startup_empty");
+            _chart.Title = L.T("chart_title");
             _tGame.Text = L.T("opt_gamemode");
             _tUsbRo.Text = L.T("opt_usbro");
             _tPassword.Text = L.T("opt_password");
@@ -1146,7 +1329,7 @@ namespace USBGuard
                 else
                 {
                     _pendingUpdate = info;
-                    _tray.ShowBalloonTip(15000, L.T("upd_title"), L.F("upd_balloon", info.Tag), ToolTipIcon.Info);
+                    Toast.Show(L.F("upd_balloon", info.Tag), ToolTipIcon.Info, _logo, L.T("toast_update"), async () => await PromptUpdate(info), L.T("upd_title"));
                 }
             }
             catch
@@ -1198,6 +1381,7 @@ namespace USBGuard
             base.OnVisibleChanged(e);
             _ring.Animate = Visible && _tabs.Selected == 0;
             _pcRing.Animate = Visible && _tabs.Selected == 1;
+            _mascot.Animate = Visible && _tabs.Selected == 5;
         }
 
         protected override async void OnHandleCreated(EventArgs e)
@@ -1225,6 +1409,12 @@ namespace USBGuard
             _repairTimer.Start();
             _scheduleTimer.Start();
             if (Settings.Realtime) _rt.Start();
+            // نزامن زر الحماية من الفدية ويا الحالة الحقيقية بـ Defender
+            _ = Task.Run(() => Ransomware.IsEnabled()).ContinueWith(t =>
+            {
+                if (t.Status == TaskStatus.RanToCompletion && t.Result.HasValue)
+                    UI(() => { Settings.Ransomware = t.Result.Value; _tRansom.SetSilently(t.Result.Value); });
+            });
 
             await Task.Run(() => { SystemTools.DisableAutorun(); SystemTools.RepairSystem(); SelfProtect.SelfRepair(); });
 
@@ -1268,11 +1458,11 @@ namespace USBGuard
         {
             Hide();
             Security.Lock();
-            if (_tabs.Selected == 4) ShowPage(0);
+            if (_tabs.Selected == 5) ShowPage(0);
             if (!_trayHintShown)
             {
                 _trayHintShown = true;
-                _tray.ShowBalloonTip(3000, "USB Guard", L.T("running_tray"), ToolTipIcon.Info);
+                Toast.Show(L.T("running_tray"), ToolTipIcon.Info, _logo, null, ShowMain);
             }
         }
 
@@ -1326,7 +1516,7 @@ namespace USBGuard
         {
             base.OnPaint(e);
             var g = e.Graphics; Theme.HQ(g);
-            using (var bg = new LinearGradientBrush(ClientRectangle, Color.FromArgb(14, 22, 42), Theme.Bg, 90f))
+            using (var bg = new LinearGradientBrush(ClientRectangle, Theme.Bg2, Theme.Bg, 90f))
                 g.FillRectangle(bg, ClientRectangle);
 
             if (_logo != null) g.DrawImage(_logo, Theme.S(14), Theme.S(10), Theme.S(24), Theme.S(24));
@@ -1349,7 +1539,7 @@ namespace USBGuard
                 return;
             }
             if (forceDialog) { Msg(text, MessageBoxButtons.OK, icon == ToolTipIcon.Warning ? MessageBoxIcon.Warning : MessageBoxIcon.Information); return; }
-            try { _tray.ShowBalloonTip(5000, "USB Guard", text, icon); } catch { }
+            Toast.Show(text, icon, _logo, Visible ? null : L.T("toast_open"), ShowMain);
         }
 
         DialogResult Msg(string text, MessageBoxButtons buttons, MessageBoxIcon icon)

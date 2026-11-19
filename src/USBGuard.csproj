@@ -15,7 +15,7 @@
     <DebugType>none</DebugType>
 
     <!-- رقم الاصدار: غيّره هنا وارفع للكيت هوب = يطلع تحديث جديد تلقائياً -->
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
 
     <Product>USB Guard</Product>
     <AssemblyTitle>USB Guard</AssemblyTitle>
@@ -37,6 +37,7 @@
   <ItemGroup>
     <EmbeddedResource Include="icon.ico" LogicalName="USBGuard.icon.ico" />
     <EmbeddedResource Include="logo.png" LogicalName="USBGuard.logo.png" />
+    <EmbeddedResource Include="mascot.png" LogicalName="USBGuard.mascot.png" />
   </ItemGroup>
 
   <ItemGroup>

@@ -30,6 +30,16 @@ namespace USBGuard
             }
         }
 
+        /// <summary>البرنامج شغال من فلاشة (نسخة محمولة بدون تثبيت)</summary>
+        public static bool IsPortable
+        {
+            get
+            {
+                try { return !IsRunningInstalled && new DriveInfo(Path.GetPathRoot(CurrentExe)).DriveType == DriveType.Removable; }
+                catch { return false; }
+            }
+        }
+
         public static bool IsRunningInstalled =>
             string.Equals(Path.GetFullPath(CurrentExe), Path.GetFullPath(InstalledExe), StringComparison.OrdinalIgnoreCase);
 

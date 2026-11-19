@@ -38,6 +38,7 @@ namespace USBGuard
             }
 
             L.Ar = Settings.Arabic;
+            Theme.Apply(Settings.Accent, Settings.LightMode);
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -71,7 +72,7 @@ namespace USBGuard
                 }
 
                 // اول تشغيل من ملف التحميل: نثبّت البرنامج بمكانه الصحيح ونشغله من هناك
-                if (!SystemTools.IsRunningInstalled)
+                if (!SystemTools.IsRunningInstalled && !SystemTools.IsPortable)
                 {
                     if (SystemTools.Install())
                     {

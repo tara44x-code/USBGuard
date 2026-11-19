@@ -44,6 +44,12 @@ USB flash drive protection for Windows — Autorun · Shortcut · gamez · Salit
 | 📄 **تقارير** | تقرير HTML احترافي بعد كل فحص |
 | 🔑 **كلمة سر** | للإعدادات والخروج وإلغاء التثبيت |
 | 🖐️ **سحب وإفلات** | اسحب ملف على البرنامج وينفحص |
+| 🔐 **حماية من الفدية** | يقفل المستندات والصور من برامج التشفير (Controlled Folder Access) |
+| 🌐 **فحص hosts** | يكشف ويصلّح تحويل المواقع وحجب برامج الحماية |
+| 🚀 **مدير بدء التشغيل** | تفعيل وتعطيل البرامج الي تشتغل ويا ويندوز |
+| 🧹 **منظّف مؤقت** | يحذف ملفات Temp وكاش المتصفحات |
+| 💾 **نسخة محمولة** | تنسخ البرنامج على الفلاشة وتشغله بأي حاسبة بدون تثبيت |
+| 🎨 **ثيمات** | 5 ألوان + وضع فاتح |
 | 🔄 **تحديث ذاتي** | يبلّغك بالتحديث الجديد ويحدّث نفسه **باختيارك** |
 | 🌐 **عربي / English** | |
 
@@ -72,5 +78,9 @@ USB flash drive protection for Windows — Autorun · Shortcut · gamez · Salit
 <div align="center">
 
 **المطور: [مهند سات لنك — Muhannad Sat Link](https://github.com/tara44x-code)**
+
+[github.com/tara44x-code](https://github.com/tara44x-code)
+
+<img src="docs/mascot.png" width="420" alt="USB Guard"/>
 
 </div>
